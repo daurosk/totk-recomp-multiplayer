@@ -264,6 +264,8 @@ Runtime probes, each a mode of `totk.exe` (the list is at the top of `runtime/ma
 part of `--probe-vkexec` translate shaders of the census below: they look for `build/<ver>/shaders/jobs.json` of the
 exe's own version first, then of the other one.
 
+The online wire (`online/proto/`, [online-wire.md](online-wire.md)): `.venv\Scripts\python tests\net_proto_check.py` compiles the codec with Monocypher using MSYS2 Clang, compares its tables with online-wire.md, runs round trips, 1 to 7 byte chunks, truncation, flipped bytes, oversize, features, sealing and the handshake, then fuzzes for 10 minutes on 4 processes (`--fuzz-seconds 30` for a quick run). Every change to `online/proto/` passes it. No game files.
+
 Shaders: `.venv-py314\Scripts\python tools\shader_census.py --version <ver> --translate` extracts every Maxwell shader
 to `build\<ver>\shaders\` and runs it through the translator and `spirv-val`; failure groups go to `failures.txt`.
 `tools\xlate_smoke.py` checks the translator alone, without game files.
