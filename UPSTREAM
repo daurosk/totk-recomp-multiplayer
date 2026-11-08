@@ -1,0 +1,4 @@
+# The TotK Recomp release this tree is built on. Updated each time a new upstream release is merged.
+repository https://github.com/valentderah/totk-pc-recomp
+version v0.3.13
+commit ae30a61b7bee4a3db959a234e7459e95939ac596
