@@ -13,7 +13,21 @@ import subprocess
 import sys
 from pathlib import Path
 
+import foreign_code
+
 MAX_BYTES = 1024 * 1024
+
+_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _credit_file(path: Path) -> bool:
+    """True for a file at the repository root that may credit another project by name (foreign_code.CREDIT_FILES)."""
+    try:
+        rel = (path if path.is_absolute() else Path.cwd() / path).resolve().relative_to(_ROOT)
+    except ValueError:
+        return False
+    return rel.as_posix() in foreign_code.CREDIT_FILES
+
 
 # Switch containers, executables and game data formats.
 BLOCKED_SUFFIXES = {
@@ -70,6 +84,10 @@ def problems_for(path: Path, allow_large: bool = False) -> list[str]:
         found.append("generated from game code")
     if KEY_LINE.search(data.decode("utf-8", errors="ignore")):
         found.append("contains a key in prod.keys format")
+    if 0 not in data[:4096] and not _credit_file(path):
+        lines = foreign_code.forbidden_lines(data.decode("utf-8", errors="ignore"))
+        if lines:
+            found.append(f"names or hashes from a closed or incompatible project (line {lines[0]}); see tools/foreign_code.py")
     return found
 
 
