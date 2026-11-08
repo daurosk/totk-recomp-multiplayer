@@ -6,6 +6,8 @@ This project builds on valentderah's recomp: the recompiler, runtime, renderer a
 
 The idea of playing Tears of the Kingdom together comes from Kirbymimi's TOTK Online mod, which brought online play to the game on Switch and emulators. TotK Recomp Multiplayer is inspired by that work but is a different project: it targets the recomp, not an emulator, and every line of its code is written for it from scratch. Nothing is copied from his mod, and the two are not compatible with each other.
 
+Join us on Discord: [dauro's co-op](https://discord.gg/GwtRKAqng5).
+
 > [!IMPORTANT]
 > **No game files are included.** You need your own legally obtained copy of *Tears of the Kingdom*, dumped from your own console: the base game and the 1.1.0, 1.2.1 or 1.4.3 update. Instructions for obtaining those files will not be provided.
 >
@@ -95,6 +97,10 @@ TotK Recomp builds on the projects below. What was taken from each, with its lic
 This project's own code is under the [GNU General Public License v3.0 or later](LICENSE). The code that comes from TotK Recomp keeps its [MIT License](licenses/TotK-Recomp-MIT.txt), Copyright (c) 2026 Valiantsin Dzerakh, and other third-party code keeps its own license ([THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)). No license grants anything for Nintendo's game.
 
 TotK Recomp Multiplayer is an independent, non-commercial fan project, not affiliated with or endorsed by Nintendo or by TotK Recomp. *The Legend of Zelda*, *Tears of the Kingdom* and *Nintendo Switch* are trademarks of Nintendo.
+
+## Contributing
+
+Anyone can contribute: fork the repository and open a pull request. [CONTRIBUTING.md](CONTRIBUTING.md) explains the rules, and questions go to [Discussions](https://github.com/daurosk/totk-recomp-multiplayer/discussions) or [Discord](https://discord.gg/GwtRKAqng5).
 
 ## Building from source
 

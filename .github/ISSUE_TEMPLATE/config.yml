@@ -3,3 +3,9 @@ contact_links:
   - name: Question or help with setup
     url: https://github.com/daurosk/totk-recomp-multiplayer/discussions
     about: Installing, updating and configuring the port. Ask in Discussions.
+  - name: Chat on Discord
+    url: https://discord.gg/GwtRKAqng5
+    about: Talk with players and developers on dauro's co-op.
+  - name: Problems in TotK Recomp itself
+    url: https://github.com/valentderah/totk-pc-recomp/issues
+    about: Bugs that also happen without multiplayer belong in TotK Recomp's issues.
