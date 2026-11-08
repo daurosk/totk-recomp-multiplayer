@@ -185,7 +185,7 @@ static uint64_t read_ptr(uint64_t a) {
 // TOTK_GAME_V121/V143). The 1.1.0 slot was measured from its own dereference chain: 181 scene accesses in that build
 // read it, and one of them reproduces this walk (the 14-component check, component 13, the 0x70 stride and the name
 // compare) instruction for instruction.
-static int player_pos(float xyz[3]) {
+static uint64_t player_actor(void) {
     uint64_t module = read_ptr(MOD_MAIN_BASE + (RT_V143 ? 0x3add238 : RT_V110 ? 0x4630a68 : 0x4728538)),
              scene = module ? read_ptr(module + 0x1e8) : 0;
     int32_t count = 0;
@@ -197,11 +197,19 @@ static int player_pos(float xyz[3]) {
         uint64_t data = read_ptr(links + (uint64_t)i * 0x70 + 8), actor = data ? read_ptr(data + 0x40) : 0;
         uint64_t name = actor ? read_ptr(actor + 0x218) : 0;
         char text[7];
-        if (name && read_guest(name, text, 7) && !memcmp(text, "Player", 7))
-            return read_guest(actor + 0x2b4, xyz, 12) && isfinite(xyz[0]) && isfinite(xyz[2]);
+        if (name && read_guest(name, text, 7) && !memcmp(text, "Player", 7)) return actor;
     }
     return 0;
 }
+
+static int player_pos(float xyz[3]) {
+    uint64_t actor = player_actor();
+    return actor && read_guest(actor + 0x2b4, xyz, 12) && isfinite(xyz[0]) && isfinite(xyz[2]);
+}
+
+// The player actor's address in guest memory (also a host address), 0 while none is resident (title screen, loading).
+// teleport.c moves the player through its position at +0x2b4. Present thread.
+uint64_t frame_step_player_actor(void) { return player_actor(); }
 
 static void speed_report(uint64_t now, double step, int interval) {
     if (!win_t0) {

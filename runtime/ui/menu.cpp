@@ -32,6 +32,7 @@ static int g_font_bad;
 #pragma clang diagnostic pop
 #include "ui/amiibo_page.h"
 #include "ui/binds_page.h"
+#include "ui/online_ui.h"
 #include "ui/option_rows.h"
 
 extern "C" {
@@ -45,6 +46,7 @@ extern "C" {
 #include "perfmon.h"
 #include "platform/platform.h"
 #include "sysinfo.h"
+#include "teleport.h"
 #include "ui/menu.h"
 #include "ui_text.h"
 // host.h and vk.h pull in cpu.h, which is C only: the functions the menu needs from them, as declared there.
@@ -83,7 +85,7 @@ static int change_open(int want) {
     if (g_open.load() != open) {
         g_open.store(open);
         g_reset.store(1);
-        input_menu(open);
+        input_menu(open || online_modal());
         rt_log("menu: %s", open ? "open" : "closed");
     }
     plat_mutex_unlock(&open_lock);
@@ -92,6 +94,16 @@ static int change_open(int want) {
 
 static void set_open(int open) { change_open(open); }
 
+// The online UI (chat box, wheel, confirmation) took or gave back the game's input: the block follows, and the next
+// laid-out frame drops stale input as it does when the menu opens.
+extern "C" void menu_input_refresh(void) {
+    plat_mutex_lock(&open_lock);
+    g_reset.store(1);
+    input_menu(g_open.load() || online_modal());
+    plat_mutex_unlock(&open_lock);
+}
+extern "C" int menu_wants_input(void) { return g_open.load(std::memory_order_relaxed) || online_modal(); }
+
 static int g_failed_flag();
 extern "C" int menu_is_open(void) { return g_open.load(std::memory_order_relaxed); }
 extern "C" void menu_toggle(void) {
@@ -99,14 +111,14 @@ extern "C" void menu_toggle(void) {
 }
 
 // ---- events from the window adapter, queued while the menu is open; the present path hands them to ImGui
-enum { EV_KEY, EV_POS, EV_BUTTON, EV_WHEEL, EV_FOCUS, EV_MAX = 256 };
+enum { EV_KEY, EV_POS, EV_BUTTON, EV_WHEEL, EV_FOCUS, EV_CHAR, EV_MAX = 256 };
 struct Ev { int type, a, b; float x, y; };
 static PlatMutex ev_lock = PLAT_MUTEX_INIT;
 static Ev ev_q[EV_MAX];
 static int ev_n;
 
 static void push(Ev e) {
-    if (!menu_is_open()) return;
+    if (!menu_wants_input()) return;
     plat_mutex_lock(&ev_lock);
     if (e.type == EV_POS && ev_n && ev_q[ev_n - 1].type == EV_POS) ev_q[ev_n - 1] = e;   // only the newest position
     else if (ev_n < EV_MAX) ev_q[ev_n++] = e;
@@ -118,6 +130,7 @@ extern "C" void menu_event_mouse_pos(float x, float y) { push({EV_POS, 0, 0, x, 
 extern "C" void menu_event_mouse_button(int button, int down) { push({EV_BUTTON, button, down, 0, 0}); }
 extern "C" void menu_event_wheel(float dx, float dy) { push({EV_WHEEL, 0, 0, dx, dy}); }
 extern "C" void menu_event_focus(int focused) { push({EV_FOCUS, focused, 0, 0, 0}); }
+extern "C" void menu_event_char(unsigned utf16) { push({EV_CHAR, (int)utf16, 0, 0, 0}); }
 
 static void drain_events(ImGuiIO &io) {
     Ev q[EV_MAX];
@@ -134,6 +147,7 @@ static void drain_events(ImGuiIO &io) {
         case EV_BUTTON: io.AddMouseButtonEvent(e.a, e.b != 0); break;
         case EV_WHEEL: io.AddMouseWheelEvent(e.x, e.y); break;
         case EV_FOCUS: io.AddFocusEvent(e.a != 0); break;
+        case EV_CHAR: io.AddInputCharacter((unsigned)e.a); break;
         }
     }
 }
@@ -381,7 +395,8 @@ extern "C" void menu_vk_release(void) {
 // TOTK_MENU_TEST_SET=<frame>:<key>=<value>[,<key>=<value>...][;<frame>:...]: cfg_set of each key (TOTK_ prefix
 // optional) at that presented frame; changes live settings with no input, menu open or not. totk.ini is written only by
 // the pseudo-key SAVE=1 (cfg_save, as a row change does; a failed write shows the menu's save note).
-enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_MODS, TAB_CHEATS, TAB_COUNT };
+enum { TAB_SCREEN, TAB_GAME, TAB_SOUND, TAB_CONTROLS, TAB_AMIIBO, TAB_MENU, TAB_ADVANCED, TAB_MODS, TAB_CHEATS, TAB_ONLINE, TAB_COUNT };
+extern "C" int online_tab_modal(void);   // ui/online_tab.cpp: a text field or a key capture has the keyboard
 enum { TEST_PAGE_FRAMES = 30, TEST_SETS = 16 };
 struct TestSet { uint64_t frame; char key[64], value[64]; };
 static struct {
@@ -1054,7 +1069,8 @@ static void tab_advanced(float scale) {
 
 static const UiTextId kTabNames[TAB_COUNT] = {UI_MENU_TAB_SCREEN,   UI_MENU_TAB_GAME,   UI_MENU_TAB_SOUND,
                                               UI_MENU_TAB_CONTROLS, UI_MENU_TAB_AMIIBO, UI_MENU_TAB_MENU,
-                                              UI_MENU_TAB_ADVANCED, UI_MENU_TAB_MODS,   UI_MENU_TAB_CHEATS};
+                                              UI_MENU_TAB_ADVANCED, UI_MENU_TAB_MODS,   UI_MENU_TAB_CHEATS,
+                                              UI_MENU_TAB_CHEATS /* TAB_ONLINE: "Online", below */};
 static int g_tab;               // the tab shown
 static int g_tab_request = -1;  // select this tab at the next layout; -1 none
 static int g_focus_page = -1;   // this tab's first row takes the cursor once it is shown; -1 none
@@ -1174,7 +1190,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     ImGui::SameLine(ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x - ImGui::CalcTextSize(version).x);
     ImGui::TextDisabled("%s", version);
 
-    int step = g_modal || binds_modal()                                                                  ? 0
+    int step = g_modal || binds_modal() || online_tab_modal() || ImGui::GetIO().WantTextInput                ? 0
              : ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) || ImGui::IsKeyPressed(ImGuiKey_E, false) ? 1
              : ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false) ? -1
                                                                                                          : 0;
@@ -1186,7 +1202,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_NoTabListScrollingButtons)) {
         for (int k = 0; k < TAB_COUNT; k++) {
             char label[128];
-            snprintf(label, sizeof label, "  %s  ###tab%d", menu_text(kTabNames[k]), k);   // the id stays per language
+            snprintf(label, sizeof label, "  %s  ###tab%d", k == TAB_ONLINE ? "Online" : menu_text(kTabNames[k]), k);   // the id stays per language
             if (!ImGui::BeginTabItem(label, nullptr, g_tab_request == k ? ImGuiTabItemFlags_SetSelected : 0)) continue;
             g_tab = k;
             if (g_focus_page == k) {
@@ -1214,6 +1230,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
                 restart_confirm();
                 break;
             case TAB_ADVANCED: tab_advanced(scale); break;
+            case TAB_ONLINE: online_tab(scale, bottom); break;
             }
             ImGui::EndTabItem();
         }
@@ -1234,7 +1251,7 @@ static void layout_menu(uint32_t w, uint32_t h, float scale) {
     if (ImGui::Button(cont, ImVec2(bw, 0))) set_open(0);
     ImGui::SameLine();
     if (ImGui::Button(quit, ImVec2(bw, 0))) gfx_window_request_close();
-    bool was_modal = g_modal || binds_modal();
+    bool was_modal = g_modal || binds_modal() || online_tab_modal() || ImGui::GetIO().WantTextInput;
     if (g_tab != TAB_ADVANCED && g_tab != TAB_CONTROLS) g_modal = false;
     if (!was_modal && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))
         set_open(0);
@@ -1511,6 +1528,8 @@ static void perf_draw(const MenuTarget *t, float scale) {
 extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const char **shot) {
     *shot = NULL;
     cheats_frame(frame);   // the data cheats and the buttons of the cheats that need them held
+    teleport_frame();      // a queued teleport writes the player's position
+    online_pump(frame);    // net events, hotkey requests, toasts
     if (!g_test.parsed) test_parse();
     if (g_test.next_set < g_test.n_sets && frame >= g_test.sets[g_test.next_set].frame) test_apply_sets(frame);
     if (g_perf_save.exchange(0)) cfg_save();
@@ -1525,7 +1544,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
             g_tab_request = 0;
             set_open(1);
             open = true;
-        } else if (!g_perf_mode) {
+        } else if (!g_perf_mode && !online_wants_frame()) {
             return 0;
         }
     }
@@ -1562,7 +1581,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     double dt = g_last_ns ? (t0 - g_last_ns) / 1e9 : 1 / 60.0;
     io.DeltaTime = (float)(dt < 1e-4 ? 1e-4 : dt > 0.1 ? 0.1 : dt);
     g_last_ns = t0;
-    if (!open) {   // the overlay alone: no input reaches ImGui
+    if (!open && !online_modal()) {   // the overlay alone: no input reaches ImGui
     } else if (g_test.page < 0) {
         drain_events(io);
         pad_events(io, reset);
@@ -1574,6 +1593,8 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     ImGui_ImplVulkan_NewFrame();
     ImGui::NewFrame();
     if (open) layout_menu(t->width, t->height, scale);
+    online_layout((float)t->width, (float)t->height, scale, open);
+    if (const char *s = online_demo_shot(frame)) *shot = s;
     perf_draw(t, scale);
     ImGui::Render();
     if (open) g_save_pending = opt_save_tick(0);

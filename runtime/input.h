@@ -47,6 +47,10 @@ void input_menu(int open);
 // of the combo, sticks are lx, ly, rx, ry. Returns 1 in the poll where the combo goes down (toggle the menu once).
 int input_menu_gate(int *held, int menu_open, uint64_t *buttons, int32_t sticks[4]);
 int input_overlay_gate(int *held, uint64_t *buttons);   // L3+R3: 1 in the poll both go down
+// The online wheel menu's pad chord (input.c): input_wheel_chord sets the Switch button bits that open it (0 off);
+// while all are held the game sees none of them, and input_wheel_held says so. Any thread.
+void input_wheel_chord(uint64_t mask);
+int input_wheel_held(void);
 int input_pad_read(uint64_t *buttons, int32_t *lx, int32_t *ly);
 // The gamepad layout in effect (PAD_LAYOUT_*, input_map.h; TOTK_PAD_LAYOUT, live); -1 without a gamepad. Any thread.
 int input_pad_layout(void);

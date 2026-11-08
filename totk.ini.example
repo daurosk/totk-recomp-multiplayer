@@ -269,6 +269,33 @@
 # The key of the application's uploaded art asset shown as the status's large image.
 # discord_image = totk_512x512
 
+[online]
+# Online play. Your name as the other players see it.
+# net_name = Player
+# The server to join, as host:port, and whether the game connects by itself when it starts (1) or the Online tab of the
+# settings menu (F1) does.
+# net_address = play.example.org:7777
+# net_autoconnect = 0
+# Keys, by name (a to z, 0 to 9, f2 to f12, enter, space, grave, slash, lbracket, rbracket, ...) or none. The wheel key is
+# held: aim with the mouse, the stick or the number keys, let go to choose. The Online tab rebinds them with a click.
+# net_key_chat = enter
+# net_key_wheel = v
+# net_key_list = p
+# net_key_accept = y
+# net_key_refuse = n
+# The controller buttons that open the wheel when held together, joined by +: a b x y lstick rstick l r zl zr plus minus
+# left up right down. The game does not see them while they are held. none turns the controller wheel off.
+# net_pad_wheel = minus+lstick
+# The wheel's size in percent (60 to 150), the seconds the chat stays on screen after the last line (3 to 30) and the
+# lines it shows (4 to 30).
+# net_wheel_scale = 100
+# net_chat_fade = 10
+# net_chat_lines = 10
+# Testing without a server: 1 plays an invented server with a few players, chat and requests, and F7 / F6 hop the player
+# 25 m east or west to try the teleport. net_fake_role is the local role: player, mod or host.
+# net_fake = 0
+# net_fake_role = host
+
 [audio]
 # none mixes without opening an audio device.
 # audio = default

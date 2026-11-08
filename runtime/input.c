@@ -610,6 +610,19 @@ int input_pad_stick_percent(double pct[2]) {
 
 static uint64_t g_buttons_last;   // the merged buttons of the last poll (input_buttons_last)
 
+// The pad chord that opens the online wheel menu (ui/online_wheel.cpp): while all its buttons are held the game
+// sees none of them. mask 0 (online play off) lets everything through.
+static uint64_t g_wheel_mask;
+static int g_wheel_held;
+void input_wheel_chord(uint64_t mask) { __atomic_store_n(&g_wheel_mask, mask, __ATOMIC_RELAXED); }
+int input_wheel_held(void) { return __atomic_load_n(&g_wheel_held, __ATOMIC_RELAXED); }
+static void wheel_gate(uint64_t *b) {
+    uint64_t m = __atomic_load_n(&g_wheel_mask, __ATOMIC_RELAXED);
+    int held = m && (*b & m) == m;
+    if (held) *b &= ~m;
+    __atomic_store_n(&g_wheel_held, held, __ATOMIC_RELAXED);
+}
+
 static void poll_merged(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx, int32_t *ry) {
     uint64_t b = 0;
     int32_t sl[2] = {0, 0}, sr[2] = {0, 0};
@@ -684,6 +697,7 @@ static void poll_merged(uint64_t *buttons, int32_t *lx, int32_t *ly, int32_t *rx
     static int combo_held;
     int32_t st[4] = {sl[0], sl[1], sr[0], sr[1]};
     int toggle = input_menu_gate(&combo_held, menu_is_open(), &b, st);
+    wheel_gate(&b);
     static int overlay_held;   // L3+R3 step the performance overlay (F10)
     int overlay = input_overlay_gate(&overlay_held, &b);
     sl[0] = st[0], sl[1] = st[1], sr[0] = st[2], sr[1] = st[3];
