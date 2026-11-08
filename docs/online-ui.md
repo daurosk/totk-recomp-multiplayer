@@ -83,9 +83,25 @@ the top ring; they follow the four built-in ones, so the ring only goes past fou
 
 ## Teleport
 
-`teleport_to` (`runtime/teleport.c`) writes the player actor's position, the field `frame_rate.c` reads for the speed
-probe, once per presented frame until it has stayed put, and logs `teleport: ...` lines with each frame's read-back. See
-the section below for what was measured.
+`teleport_to` (`runtime/teleport.c`) writes the player's position once per presented frame until it has stayed put, and
+logs `teleport: ...` lines with each frame's read-back.
+
+**Status: not working yet.** On 1.2.1 the write does not hold. The player actor's position (`+0x2b4`, the field
+`frame_rate.c` reads for the speed probe) is a copy the game rewrites every frame from a physics source we have not
+found: the move reads back as the old position at every present. Measured with `TOTK_TELEPORT_SCAN=1`, which logs the
+objects reachable from the actor that hold the position:
+
+- copies with the same height: `actor+0x284`, `actor+0x2b4`, `[actor+0x1c0]+0xb0` and `+0xe0`, and about forty more
+  deeper in the actor's pointer graph;
+- copies 0.9 m higher (the body's centre) and 1.5 m higher: `[actor+0x238]+0x2e4`, `+0x2fc`, `+0x308`,
+  `[actor+0x608]+0x240` and many below `actor->0x8`.
+
+Writing the first eight of those (`kSlots`), and with `TOTK_TELEPORT_SCAN=all` every copy the scan found (62), changed
+nothing. So the source is something the scan cannot match: a position stored another way (relative to a cell origin,
+double precision, a transform with the translation split from the rotation), or deeper than three pointers. Next steps:
+find the guest function that places the player (the game's own setter for a warp, used for fast travel and respawn) and
+call it from the guest's main thread at a safe point, or find the Havok body of the player and set its transform and
+velocity together. `kSlots` stays as the list of copies written, each only when it holds the current position.
 
 ## Settings
 

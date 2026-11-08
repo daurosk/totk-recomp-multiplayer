@@ -83,6 +83,8 @@ The Switch prompts stay, with a note under *Button prompts* and a `RomFS overlay
 | F10 | L3 + R3 (both stick clicks) | performance overlay: off, frame rate, full panel |
 | F11 | | borderless fullscreen on or off, saved to `totk.ini` |
 
+Online play adds keys of its own while a server is connected ([online-ui.md](online-ui.md)): Enter opens the chat, V held opens the wheel menu (Minus and the left stick click held together on a pad), P shows the player list, Y and N answer teleport and team requests. None of them is used by the game, and the game gets no input while the chat box or the wheel is open. The Online tab of the menu rebinds them.
+
 The Minus+Plus combo never reaches the game. In the menu the arrow keys, the D-pad or the left stick move, Enter or A selects, Q and E or L and R switch tabs, Esc or B goes back (Switch button names, as in the table above).
 
 ## Remapping

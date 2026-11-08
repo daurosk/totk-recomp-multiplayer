@@ -18,35 +18,72 @@
 #define SETTLE_DIST 1.5f
 #define WAIT_ACTOR_FRAMES 300   // presents to wait for a resident player before dropping the move
 
+// Where the player's position lives: the actor's own copies and a structure its pointer at +0x1c0 leads to (found with
+// TOTK_TELEPORT_SCAN on 1.2.1). A slot is written only when it holds the player's current position at the start of
+// the move, so an offset that means something else in another game version is left alone.
+static const struct { uint64_t ptr, off; float dy; } kSlots[] = {
+    {0, 0x2b4, 0}, {0, 0x284, 0}, {0x1c0, 0xb0, 0}, {0x1c0, 0xe0, 0}, {0x238, 0x2e4, 0.9f}, {0x238, 0x2fc, 1.5f},
+    {0x238, 0x308, 0.9f}, {0x608, 0x240, 0.9f}};
+#define NSLOTS (sizeof kSlots / sizeof *kSlots)
+static int g_slot_on[NSLOTS];
+
+static uint64_t slot_addr(uint64_t actor, int i) {
+    if (!kSlots[i].ptr) return actor + kSlots[i].off;
+    uint64_t p = 0;
+    if (!plat_mem_read(actor + kSlots[i].ptr, &p, 8) || p < 0x10000 || p == actor) return 0;
+    return p + kSlots[i].off;
+}
+
+static int near3(const float a[3], const float b[3], float dy) {
+    return fabsf(a[0] - b[0]) < 0.05f && fabsf(a[1] - b[1] - dy) < 0.05f && fabsf(a[2] - b[2]) < 0.05f;
+}
+
 static float g_target[3];
 static int g_frames_left;   // presents left to keep writing
 static int g_wait;          // presents spent waiting for an actor
 static int g_settled;
 static int g_active;
 
-// TOTK_TELEPORT_SCAN=1: at each teleport, logs where else the player's position sits, the actor's own fields and the
-// structures its pointers lead to, to find the copy the game reads the position from.
+// TOTK_TELEPORT_SCAN=1: at each teleport, walks the objects reachable from the player actor through pointers (a few levels
+// deep) and logs every place that holds the player's position (x and z within 3 cm, y within 3 m), with the chain of
+// offsets that leads there, to find the copy the game reads the position from.
+#define SCAN_MAX 6000
+static struct { uint64_t addr; float dy; } g_dyn[400];
+static int g_dyn_n, g_dyn_all;
+static uint64_t g_seen[SCAN_MAX];
+static unsigned g_chain[SCAN_MAX][4];
+static unsigned g_depth[SCAN_MAX];
+
 static void scan_copies(uint64_t actor, const float pos[3]) {
-    int hits = 0;
-    for (uint64_t off = 0; off < 0x1000 && hits < 60; off += 8) {
-        uint64_t p = 0;
-        if (!plat_mem_read(actor + off, &p, 8) || p < 0x10000 || p > 0x7fffffffffffull) continue;
-        for (uint64_t o2 = 0; o2 < 0x800 && hits < 60; o2 += 4) {
+    int n = 0, hits = 0;
+    g_seen[n] = actor, g_depth[n] = 0, n++;
+    g_dyn_n = 0;
+    for (int i = 0; i < n && hits < 120; i++) {
+        uint64_t o = g_seen[i];
+        for (uint64_t off = 0; off < 0x800; off += 4) {
             float f[3];
-            if (!plat_mem_read(p + o2, f, 12)) break;
-            if (fabsf(f[0] - pos[0]) < 0.05f && fabsf(f[1] - pos[1]) < 0.05f && fabsf(f[2] - pos[2]) < 0.05f) {
-                rt_log("teleport: copy at [actor+0x%llx]+0x%llx = %.2f %.2f %.2f", (unsigned long long)off, (unsigned long long)o2,
-                       f[0], f[1], f[2]);
+            if (!plat_mem_read(o + off, f, 12)) break;
+            if (fabsf(f[0] - pos[0]) < 0.03f && fabsf(f[2] - pos[2]) < 0.03f && fabsf(f[1] - pos[1]) < 3.0f && hits < 120) {
+                char path[96] = "actor";
+                for (unsigned d = 0; d < g_depth[i]; d++) snprintf(path + strlen(path), sizeof path - strlen(path), "->0x%x", g_chain[i][d]);
+                rt_log("teleport: copy at %s +0x%llx = %.2f %.2f %.2f", path, (unsigned long long)off, f[0], f[1], f[2]);
                 hits++;
+                if (g_dyn_n < 400) g_dyn[g_dyn_n].addr = o + off, g_dyn[g_dyn_n++].dy = f[1] - pos[1];
+            }
+            uint64_t p = 0;
+            if (!(off & 7) && g_depth[i] < 3 && n < SCAN_MAX && plat_mem_read(o + off, &p, 8) && p > 0x100000 && p < 0x7fffffffffffull) {
+                int dup = 0;
+                for (int k = 0; k < n && !dup; k++) dup = g_seen[k] == p;
+                if (!dup) {
+                    g_seen[n] = p, g_depth[n] = g_depth[i] + 1;
+                    memcpy(g_chain[n], g_chain[i], sizeof g_chain[n]);
+                    g_chain[n][g_depth[i]] = (unsigned)off;
+                    n++;
+                }
             }
         }
     }
-    for (uint64_t off = 0; off < 0x1000; off += 4) {
-        float f[3];
-        if (plat_mem_read(actor + off, f, 12) && fabsf(f[0] - pos[0]) < 0.05f && fabsf(f[1] - pos[1]) < 0.05f &&
-            fabsf(f[2] - pos[2]) < 0.05f)
-            rt_log("teleport: copy at actor+0x%llx", (unsigned long long)off);
-    }
+    rt_log("teleport: scanned %d objects, %d copies", n, hits);
 }
 
 static int in_world(const float p[3]) {
@@ -70,7 +107,17 @@ int teleport_to(const float xyz[3]) {
     const char *scan = cfg_get("TOTK_TELEPORT_SCAN");
     uint64_t a = frame_step_player_actor();
     float now[3];
-    if (scan && !strcmp(scan, "1") && a && plat_mem_read(a + POS_OFF, now, 12)) scan_copies(a, now);
+    if (a && plat_mem_read(a + POS_OFF, now, 12)) {
+        g_dyn_all = scan && !strcmp(scan, "all");
+        if (scan && (!strcmp(scan, "1") || g_dyn_all)) scan_copies(a, now);
+        for (unsigned i = 0; i < NSLOTS; i++) {
+            float v[3];
+            uint64_t s = slot_addr(a, (int)i);
+            g_slot_on[i] = s && plat_mem_read(s, v, 12) && near3(v, now, kSlots[i].dy);
+        }
+        rt_log("teleport: slots written: %d %d %d %d %d %d %d %d", g_slot_on[0], g_slot_on[1], g_slot_on[2], g_slot_on[3],
+               g_slot_on[4], g_slot_on[5], g_slot_on[6], g_slot_on[7]);
+    }
     return 1;
 }
 
@@ -98,5 +145,14 @@ void teleport_frame(void) {
         g_active = 0;
         return;
     }
-    memcpy((void *)(uintptr_t)(a + POS_OFF), g_target, 12);
+    for (unsigned i = 0; i < NSLOTS; i++) {
+        uint64_t s = g_slot_on[i] ? slot_addr(a, (int)i) : 0;
+        float v[3] = {g_target[0], g_target[1] + kSlots[i].dy, g_target[2]};
+        if (s && plat_mem_readable(s, 12)) memcpy((void *)(uintptr_t)s, v, 12);
+    }
+    if (g_dyn_all)
+        for (int i = 0; i < g_dyn_n; i++) {
+            float v[3] = {g_target[0], g_target[1] + g_dyn[i].dy, g_target[2]};
+            if (plat_mem_readable(g_dyn[i].addr, 12)) memcpy((void *)(uintptr_t)g_dyn[i].addr, v, 12);
+        }
 }
