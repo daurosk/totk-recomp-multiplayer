@@ -96,22 +96,34 @@ the top ring; they follow the four built-in ones, so the ring only goes past fou
 `teleport_to` (`runtime/teleport.c`) writes the player's position once per presented frame until it has stayed put, and
 logs `teleport: ...` lines with each frame's read-back.
 
-**Status: not working yet.** On 1.2.1 the write does not hold. The player actor's position (`+0x2b4`, the field
-`frame_rate.c` reads for the speed probe) is a copy the game rewrites every frame from a physics source we have not
-found: the move reads back as the old position at every present. Measured with `TOTK_TELEPORT_SCAN=1`, which logs the
-objects reachable from the actor that hold the position:
+**Status: the physics path is found on 1.2.1 and moves the player; the full teleport is not finished.**
 
-- copies with the same height: `actor+0x284`, `actor+0x2b4`, `[actor+0x1c0]+0xb0` and `+0xe0`, and about forty more
-  deeper in the actor's pointer graph;
-- copies 0.9 m higher (the body's centre) and 1.5 m higher: `[actor+0x238]+0x2e4`, `+0x2fc`, `+0x308`,
-  `[actor+0x608]+0x240` and many below `actor->0x8`.
+Where the position comes from (1.2.1, found with `TOTK_TELEPORT_WATCH`, a hardware write watchpoint):
 
-Writing the first eight of those (`kSlots`), and with `TOTK_TELEPORT_SCAN=all` every copy the scan found (62), changed
-nothing. So the source is something the scan cannot match: a position stored another way (relative to a cell origin,
-double precision, a transform with the translation split from the rotation), or deeper than three pointers. Next steps:
-find the guest function that places the player (the game's own setter for a warp, used for fast travel and respawn) and
-call it from the guest's main thread at a safe point, or find the Havok body of the player and set its transform and
-velocity together. `kSlots` stays as the list of copies written, each only when it holds the current position.
+- `actor+0x2b4` is written once per frame by the actor's set-transform `main+0x823fd8` (actor, row-major 3x4 matrix,
+  frame step), called from `main+0x82133c` (the matrix pointer is in x26 at `main+0x821500`), called from the actor
+  update `main+0x819f34`. Inside it, `main+0x8250f8` refills the matrix from the physics body, so substituting the
+  matrix alone changes nothing.
+- The body is `B = [[[[actor+0x228]+0x50]+0x20]+0x150]`; `B+0x98` holds its transform (row-major 3x4), `B+0x68` its
+  flags, `[B+0x70]` its handle `H` (`[H+8]` is the body id). The physics sync `main+0x76c294` (a job, from
+  `main+0x2331160`) copies the world's transform into `B+0x98` every frame.
+- `main+0xaa9b90 (H, const row-major 3x4 *, B)` writes a new transform into the physics world's body; the sync uses it
+  when the game moves a body. The world is `[[[[main+0x462e038]]+0xc8 + 8*(B+0x68 bit 5)]+0xc0]+0xe0`; its vtable
+  `+0x1d0 (world, id)` returns the body's live linear velocity.
+
+What is in the tree: patch set `teleport` (`recomp/patches-v121.txt`) turns `main+0x821500` into a call of the host
+function at page `+0xf60` (`teleport.c set_transform_hook`). While a move holds the player, it calls `main+0xaa9b90`
+on the game's thread with the target translation, zeroes the linear velocity, and hands the actor the moved matrix.
+`TOTK_TELEPORT_HOOK=<frames>` uses it for that many frames (the default path is still the old slot writes).
+
+Measured: a +5 m vertical hop holds, then Link falls back and lands on the ground; a 25 m hop east of Lookout Landing
+at the same height moves him there but he falls through the terrain, which rises there (target inside the ground).
+Still to do: release logic that detects landing (vertical speed back to 0) and retries higher when the player keeps
+falling; a longer hold for far moves until the area streams in; the refusals (menu: no hook calls while paused;
+mounted, climbing, cutscene, dead and shrine still need the player's state); the reason sent back to the UI; and
+1.4.3, whose update is not on this machine (no 1.4.3 addresses yet). Tools: `TOTK_TELEPORT_TEST` (scripted moves),
+`TOTK_TELEPORT_SHOTS` (before and after pictures), `TOTK_TELEPORT_WATCH=<hex>` or `=b<hex>` (writers of an actor or
+body field, logged as executable offsets for `build/<ver>/totk.map`), `TOTK_TELEPORT_VT=1` (handle vtable dump).
 
 ## Settings
 

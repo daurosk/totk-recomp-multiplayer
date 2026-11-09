@@ -13,6 +13,8 @@ int teleport_to(const float xyz[3]);
 int teleport_busy(void);
 // Once per presented frame, before the UI.
 void teleport_frame(void);
+// TOTK_TELEPORT_TEST: runs the scripted moves; a path when the frame being presented is to be saved. Present thread.
+const char *teleport_test_shot(void);
 #ifdef __cplusplus
 }
 #endif

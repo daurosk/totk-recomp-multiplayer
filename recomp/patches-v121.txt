@@ -1076,3 +1076,10 @@ spin sdk 3d3250 3d3270   # 9 instructions; loads
 # goes in just before the rounding, as the community's shadow resolution mods do (1.1.0: mov w11, #1024 over the
 # computation). Found by a write watch on the size field (the writer was this function, and no other).
 site shadow main cec22c 11001d6b @page:x11 b9405d6b 11001d6b   # add w11, w11, #7 -> adrp x11, page; ldr w11, [x11, #92]; add w11, w11, #7
+
+# Teleport (runtime/teleport.c). The actor update (main+0x819f34) hands each frame's transform to the actor's
+# set-transform (main+0x823fd8: actor +0x2b4 position, +0x2c0 rotation, velocity from the change) through
+# main+0x82133c, which loads the matrix pointer from x26 right before the call. The host callback at page +0xf60
+# performs that load and, while a teleport holds the player, points x1 at the target transform instead.
+set teleport TOTK_TELEPORT_PATCH 1
+site teleport main 821500 aa1a03e1 94fc2a98   # mov x1, x26 (bl main+0x823fd8 follows)
