@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <ctype.h>
+#include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,6 +22,7 @@ extern "C" {
 #include "platform/platform.h"
 #include "teleport.h"
 #include "puppet_self.h"
+#include "vk_camera.h"
 #include "ui/menu.h"
 }
 
@@ -736,8 +738,61 @@ void online_pump(uint64_t frame) {
             }
 }
 
+// ---- name tags over the other players' puppets
+// Each puppet's name is drawn behind every window, over the point TAG_HEIGHT above its feet, projected with the scene
+// camera's view-projection (vk_camera.h). The clip w of a perspective projection is the depth in front of the camera,
+// so a point with w at or under TAG_NEAR is behind the camera and gets no tag, and w also sets the fade: full up to
+// TAG_FULL_M, gone at TAG_FAR_M, the text a little smaller with distance. No tag while the scene camera is stale (a
+// menu, a loading screen: no scene was drawn for TAG_CAM_STALE_NS). The game draws with an upper-left window origin
+// (docs/maxwell.md 1.15), so NDC y -1 is the top of the screen; TOTK_PUPPET_TAG_FLIPY=1 turns that round.
+#define TAG_HEIGHT 2.05f
+#define TAG_NEAR 0.3f
+#define TAG_FULL_M 40.0f
+#define TAG_FAR_M 120.0f
+#define TAG_CAM_STALE_NS 250000000ull
+
+void online_tags_layout(float w, float h, float scale) {
+    if (net_state() != NET_ONLINE) return;
+    float m[16];
+    uint64_t age = 0;
+    if (!vk_camera_viewproj(m, &age) || age > TAG_CAM_STALE_NS) return;
+    static const int flip = rt_knob("PUPPET_TAG_FLIPY", "0");
+    NetPuppet pp[NET_MAX_PLAYERS];
+    int n = net_puppets(pp, NET_MAX_PLAYERS);
+    if (n <= 0) return;
+    ImDrawList *dl = ImGui::GetBackgroundDrawList();
+    ImFont *font = ImGui::GetFont();
+    float base = ImGui::GetFontSize();
+    NetPlayer pl;
+    for (int i = 0; i < n; i++) {
+        const NetPuppet &p = pp[i];
+        float x = p.pos[0], y = p.pos[1] + TAG_HEIGHT, z = p.pos[2], c[4];
+        for (int r = 0; r < 4; r++) c[r] = m[r * 4] * x + m[r * 4 + 1] * y + m[r * 4 + 2] * z + m[r * 4 + 3];
+        if (!(c[3] > TAG_NEAR) || c[3] > TAG_FAR_M) continue;
+        float nx = c[0] / c[3], ny = c[1] / c[3];
+        if (fabsf(nx) > 1.2f || fabsf(ny) > 1.2f) continue;
+        if (flip) ny = -ny;
+        float sx = (nx * 0.5f + 0.5f) * w, sy = (ny * 0.5f + 0.5f) * h;
+        float fade = c[3] <= TAG_FULL_M ? 1.0f : (TAG_FAR_M - c[3]) / (TAG_FAR_M - TAG_FULL_M);
+        float a = fade * p.alpha;
+        if (a <= 0.02f) continue;
+        float size = base * (c[3] < 10 ? 1.0f : fmaxf(0.7f, 1.0f - (c[3] - 10) * 0.004f));
+        ImU32 col = IM_COL32(245, 240, 225, 255);
+        if (net_player_by_id(p.id, &pl)) online_player_color(pl, &col);
+        ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0, p.name);
+        ImVec2 at(sx - ts.x / 2, sy - ts.y);
+        int ia = (int)(a * 255);
+        float pad = 4 * scale;
+        dl->AddRectFilled(ImVec2(at.x - pad, at.y - pad / 2), ImVec2(at.x + ts.x + pad, at.y + ts.y + pad / 2),
+                          IM_COL32(0, 0, 0, ia * 110 / 255), 4 * scale);
+        dl->AddText(font, size, ImVec2(at.x + 1, at.y + 1), IM_COL32(0, 0, 0, ia * 200 / 255), p.name);
+        dl->AddText(font, size, at, (col & ~IM_COL32_A_MASK) | ((ImU32)ia << IM_COL32_A_SHIFT), p.name);
+    }
+}
+
 void online_layout(float w, float h, float scale, bool menu_open) {
     if (!net_enabled() || menu_open) return;
+    online_tags_layout(w, h, scale);
     online_chat_layout(w, h, scale);
     online_list_layout(w, h, scale);
     online_toasts_layout(w, h, scale);

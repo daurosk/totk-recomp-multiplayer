@@ -29,6 +29,7 @@
 #include "vk_exec.h"
 #include "platform/platform.h"
 #include "vk_dlaa.h"
+#include "vk_camera.h"
 
 #define MAX_BINDINGS 128
 #define MAX_DESC 1024
@@ -2322,6 +2323,7 @@ static int prepare_draw(VkExec *ex, int prim, int32_t count, int restart) {
         if (ex->mark && vk_exec_frame.draws == ex->mark_draws0) ex->mark->first[0] = vs, ex->mark->first[1] = fs;
     }
     vk_dlaa_draw(ex);
+    vk_camera_draw(ex);
     vk_mvsurvey_draw(ex);
     vk_mvprev_draw(ex);
     record_fixed(ex);

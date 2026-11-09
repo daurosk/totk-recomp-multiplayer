@@ -47,6 +47,8 @@ void online_list_toggle(void);
 void online_confirm(const char *question, const char *yes_label, void (*yes)(void *), void *user);
 void online_chat_layout(float w, float h, float scale);
 void online_list_layout(float w, float h, float scale);
+// Name tags over the other players' puppets (online_ui.cpp), drawn behind every window.
+void online_tags_layout(float w, float h, float scale);
 void online_toasts_layout(float w, float h, float scale);
 void online_confirm_layout(float w, float h, float scale);
 const char *online_key_name(int imgui_key);                        // "V", "Enter"; "none" for ImGuiKey_None
