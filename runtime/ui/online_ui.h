@@ -54,24 +54,6 @@ int online_key_from_name(const char *name);
 int online_cfg_key(const char *setting, int fallback);             // a bound key from the settings
 bool online_player_color(const NetPlayer &p, ImU32 *col);          // role colour of a name
 
-// ---- the game's look (ui/online_ui.cpp): everything the online UI draws over the game uses these. The face is the Switch
-// standard shared font read from the player's files (ui/menu.cpp online_game_font; the menu font when there is none),
-// text is cream with a one-pixel dark shadow, panels are sharp-cornered translucent dark bars, and a coloured square
-// marks a person or a kind, as in the game's own HUD.
-ImFont *online_game_font();
-ImFont *look_font();
-void look_text(ImDrawList *dl, float size, ImVec2 pos, ImU32 col, const char *text, const char *end = nullptr);
-float look_width(float size, const char *text, const char *end = nullptr);
-void look_bar(ImDrawList *dl, ImVec2 a, ImVec2 b, int alpha, float fade_w = 0);   // fade_w: the right edge fades over it
-void look_square(ImDrawList *dl, ImVec2 a, float side, ImU32 col);
-struct LookStyle {   // the game's colours and flat corners for ImGui widgets, and its font, until destroyed
-    LookStyle();
-    ~LookStyle();
-};
-#define LOOK_TEXT IM_COL32(246, 241, 224, 255)
-#define LOOK_DIM IM_COL32(190, 186, 168, 255)
-#define LOOK_GOLD IM_COL32(255, 226, 140, 255)
-
 // The wheel (ui/online_wheel.cpp)
 bool online_wheel_pump(float w, float h);                          // present thread, once per frame; true while open
 void online_wheel_layout(float w, float h, float scale);
