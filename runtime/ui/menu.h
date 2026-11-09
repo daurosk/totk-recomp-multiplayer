@@ -26,6 +26,8 @@ extern "C" {
 int menu_is_open(void);
 void menu_toggle(void);                   // F1 / Esc on the keyboard, Minus+Plus on the pad
 void menu_perf_cycle(void);               // F10: the performance overlay off, fps, full
+int menu_wants_input(void);               // the menu is open or the online UI (chat box, wheel, confirmation) takes the input
+void menu_input_refresh(void);            // the online UI changed what blocks the game's input (ui/online_ui.cpp)
 
 // ---- events from the window adapter, used only while the menu is open. key: an ImGuiKey; coordinates in pixels of the
 // window's client area, which is the swapchain image.
@@ -34,6 +36,7 @@ void menu_event_mouse_pos(float x, float y);
 void menu_event_mouse_button(int button, int down);   // 0 left, 1 right, 2 middle
 void menu_event_wheel(float dx, float dy);
 void menu_event_focus(int focused);
+void menu_event_char(unsigned codepoint); // a typed character (Unicode code point), for text fields; used while input is wanted
 
 // ---- the overlay, drawn into the swapchain image after the game image (gfx_present.c, present lock held)
 typedef struct {
