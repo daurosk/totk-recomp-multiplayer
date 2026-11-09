@@ -29,7 +29,9 @@ downloading the new one.
 ## The check
 
 `totk.exe` calls `update_at_start` for a normal start only (not for `--prepare-shaders`, the probes, `--seconds` or a
-restart from the settings menu), before its window opens. `totk-update.exe --check DIR --pid PID`:
+restart from the settings menu), before its window opens. When the updater starts the game after an update, done,
+cancelled or refused, it sets `TOTK_UPDATER_STARTED` and the game skips that one check: a refused release would
+otherwise be offered again at once. `totk-update.exe --check DIR --pid PID`:
 
 1. Restores the install folder if the last update was cut off (the journal, below).
 2. Unless `update_check = 0`, asks `https://api.github.com/repos/daurosk/totk-recomp-multiplayer/releases/latest` in a
@@ -86,7 +88,9 @@ redirect never goes from `https` to `http`.
    starts. If even that fails, the message asks to run `TotKMP-Setup.exe` on the folder and the game does not start.
 
 A power cut or a killed updater leaves `journal.txt` at `patching`; the next `--check` restores the backup before the
-game starts and says so. `update/updater.lock` (deleted when the updater ends) keeps a second updater out, and a game
+game starts and says so. The running `totk.exe` and `totk-update.exe` may be the update's new ones: they cannot be
+overwritten, so they are renamed into `update/trash/` first; the updater then starts the restored game (which skips
+its check this once) and the game that asked exits. `update/updater.lock` (deleted when the updater ends) keeps a second updater out, and a game
 started during an update says the update is running and exits.
 
 The log is `update/update.log`.

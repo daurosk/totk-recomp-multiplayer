@@ -59,8 +59,12 @@ NOTES = ('# TotK Recomp Multiplayer 0.1.1 (TotK Recomp 0.3.13)\n\nThis release f
 user32 = ctypes.WinDLL('user32', use_last_error=True)
 kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
 user32.SetProcessDPIAware()
+user32.GetParent.argtypes = (wt.HWND,)
+user32.GetParent.restype = wt.HWND
+user32.GetDlgCtrlID.argtypes = (wt.HWND,)
+user32.PostMessageW.argtypes = (wt.HWND, wt.UINT, wt.WPARAM, wt.LPARAM)
 WNDENUMPROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
-BM_CLICK = 0x00F5
+WM_COMMAND = 0x0111
 SWP_NOZORDER, SWP_NOACTIVATE, SWP_NOSIZE = 0x0004, 0x0010, 0x0001
 
 failures = []
@@ -357,7 +361,9 @@ def text_of(hwnd):
 def click(hwnd, label):
     for h, t, c in children(hwnd):
         if c.lower() == 'button' and t.replace('&', '') == label:
-            user32.PostMessageW(h, BM_CLICK, 0, 0)
+            # the window is never active (TOTK_TEST_WINDOW), and BM_CLICK may be lost on an inactive dialog: the
+            # parent gets the button's own BN_CLICKED notification instead
+            user32.PostMessageW(user32.GetParent(h), WM_COMMAND, user32.GetDlgCtrlID(h), h)
             return True
     return False
 
@@ -639,9 +645,11 @@ def s_killed(work, bins, server, key, a):
     check((d / 'update' / 'journal.txt').read_text().strip() == 'patching', 'killed: the journal says patching')
     p = start_game(d)
     ok_message(d, a.slot, ['did not finish', 'previous version was put back'])
-    if answer_prompt(d, 'Later', a.slot):   # 0.1.1 is still newer than what is installed again
-        check(wait_exit(p, 30) and wait_until(lambda: starts(d)[-1:] == [f'started {OLD}'], 10),
-              'killed: the old game starts')
+    # the game that was started may be the update's new totk.exe: it exits, and the updater starts the restored one,
+    # which skips the check this once (no prompt)
+    check(wait_exit(p, 30) and wait_until(lambda: starts(d)[-1:] == [f'started {OLD}'], 30),
+          'killed: the old game starts')
+    no_updater_left(d)
     after = snapshot(d)
     check(after == before, 'killed: every file is as before the update' +
           ('' if after == before else f' (differ: {sorted(set(after.items()) ^ set(before.items()))[:6]})'))
@@ -676,6 +684,9 @@ def main():
     ap.add_argument('--only')
     ap.add_argument('--slot', type=int, default=0)
     a = ap.parse_args()
+    # the updater opens every window of its own in this slot of the second monitor, never activated (update.c,
+    # test_window_setup); the game and setup stand-ins open none
+    os.environ['TOTK_TEST_WINDOW'] = str(a.slot)
     work = a.work.resolve()
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)

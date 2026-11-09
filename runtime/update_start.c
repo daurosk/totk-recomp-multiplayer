@@ -4,6 +4,8 @@
 // started the update or one is already running: the game then exits, and the updater starts it again when it is done.
 // Before that it restores an install whose last update was cut off. main.c calls this for a normal start only: not
 // for the tool modes (--prepare-shaders and the probes), a scripted run (--seconds) or a restart from the settings menu.
+// Nor when the updater itself starts the game after an update, done or refused (TOTK_UPDATER_STARTED, set by
+// update.c start_game): asking again would show a refused release's prompt again, in a loop.
 #include "update_start.h"
 
 #include "host.h"
@@ -17,6 +19,12 @@
 #define EXIT_UPDATING 10
 
 void update_at_start(void) {
+    wchar_t mark[4];
+    if (GetEnvironmentVariableW(L"TOTK_UPDATER_STARTED", mark, 4)) {
+        SetEnvironmentVariableW(L"TOTK_UPDATER_STARTED", NULL);   // a later restart of this game checks as usual
+        rt_log("update: started by the updater after an update; no check");
+        return;
+    }
     wchar_t dir[MAX_PATH * 2], exe[MAX_PATH * 2 + 32], cmd[MAX_PATH * 6];
     DWORD n = GetModuleFileNameW(NULL, dir, MAX_PATH * 2);
     if (!n || n >= MAX_PATH * 2) return;

@@ -938,9 +938,11 @@ static void append_arg(wchar_t *cmd, size_t cap, const wchar_t *arg) {
     cmd[n] = 0;
 }
 
-/* Starts the game of the install folder. */
+/* Starts the game of the install folder. TOTK_UPDATER_STARTED tells it (runtime/update_start.c, update_at_start) to
+ * skip its update check this once: after a refused update the check would show the same prompt again. */
 static void start_game(void) {
     wchar_t exe[PATHW], cmd[PATHW] = L"";
+    SetEnvironmentVariableW(L"TOTK_UPDATER_STARTED", L"1");
     swprintf(exe, PATHW, L"%ls\\totk.exe", g_dir);
     append_arg(cmd, PATHW, exe);
     STARTUPINFOW si = {sizeof si};
@@ -1179,8 +1181,15 @@ static int restore_install(void) {
                         }
                     }
                     if (!move_path(a, b, 0)) ok = 0, LOG("restore: cannot put back %ls (error %lu)", b, GetLastError());
-                } else if (!move_path(a, b, 1)) {
-                    ok = 0, LOG("restore: cannot put back %ls (error %lu)", b, GetLastError());
+                } else {
+                    /* a running program (the game and this updater, when the check at start restores) cannot be
+                       replaced, but it can be renamed: the update's file goes to the trash first */
+                    if (exists(b)) {
+                        swprintf(t, PATHW, L"%ls\\%d-%ls", trash, n_entry, name);
+                        delete_tree(t);
+                        if (!move_path(b, t, 0)) LOG("restore: cannot move %ls aside (error %lu)", b, GetLastError());
+                    }
+                    if (!move_path(a, b, 1)) ok = 0, LOG("restore: cannot put back %ls (error %lu)", b, GetLastError());
                 }
             }
             free(name);
@@ -1916,8 +1925,12 @@ static int mode_check(DWORD game_pid) {
     }
     int rec = recover();
     if (rec > 0) {
-        MessageBoxW(NULL, L"The last update did not finish. The previous version was put back.", PRODUCT_NAME,
-                    MB_OK | MB_ICONWARNING);
+        /* the game that asked may be the cut-off update's new totk.exe (now in update\trash), and so may this
+           updater: the restored game starts instead, without a check, and the caller exits */
+        MessageBoxW(NULL, L"The last update did not finish. The previous version was put back and starts now.",
+                    PRODUCT_NAME, MB_OK | MB_ICONWARNING);
+        start_game();
+        return EXIT_UPDATING;
     } else if (rec < 0) {
         MessageBoxW(NULL, L"The last update did not finish and could not be undone. Run TotKMP-Setup.exe on the install "
                           L"folder to repair the game.", PRODUCT_NAME, MB_OK | MB_ICONERROR);
@@ -2064,9 +2077,57 @@ static int mode_selftest(void) {
 
 /* ---- main ---------------------------------------------------------------------------------------------------- */
 
+/* ---- TOTK_TEST_WINDOW=<slot> (test runs, as the game's runtime/gfx_window_win.c): every top-level window of the
+ * updater (progress window, task dialog, message boxes) opens at the top left of that slot, a third of the second
+ * monitor's working area stacked top to bottom, and is never activated, so a test never takes the user's focus. A
+ * thread-local CBT hook on the UI thread does it: HCBT_ACTIVATE comes before the window is first shown and activated,
+ * after the dialog code has centred it, so the move sticks, and returning nonzero refuses the activation. The variable
+ * is inherited by the copy the updater relaunches itself as and by the game it starts. */
+static int g_test_slot = -1;
+static RECT g_test_area;
+
+static BOOL CALLBACK test_find_secondary(HMONITOR m, HDC dc, LPRECT r, LPARAM out) {
+    (void)dc, (void)r;
+    MONITORINFO mi = {sizeof mi};
+    if (GetMonitorInfoW(m, &mi) && !(mi.dwFlags & MONITORINFOF_PRIMARY)) {
+        *(MONITORINFO *)out = mi;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static LRESULT CALLBACK test_cbt(int code, WPARAM wp, LPARAM lp) {
+    if (code == HCBT_ACTIVATE) {
+        HWND h = (HWND)wp;
+        if (!(GetWindowLongW(h, GWL_STYLE) & WS_CHILD)) {
+            SetWindowPos(h, HWND_BOTTOM, g_test_area.left, g_test_area.top, 0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+            return 1;   /* refuse the activation */
+        }
+    }
+    return CallNextHookEx(NULL, code, wp, lp);
+}
+
+static void test_window_setup(void) {
+    wchar_t v[8];
+    DWORD n = GetEnvironmentVariableW(L"TOTK_TEST_WINDOW", v, 8);
+    if (n != 1 || v[0] < L'0' || v[0] > L'2') return;
+    g_test_slot = v[0] - L'0';
+    MONITORINFO mi = {0};
+    EnumDisplayMonitors(NULL, NULL, test_find_secondary, (LPARAM)&mi);
+    if (!mi.cbSize) {
+        mi.cbSize = sizeof mi;
+        GetMonitorInfoW(MonitorFromPoint((POINT){0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+    }
+    RECT w = mi.rcWork;
+    int third = (w.bottom - w.top) / 3;
+    g_test_area = (RECT){w.left + 20, w.top + g_test_slot * third + 20, w.right, w.top + (g_test_slot + 1) * third};
+    SetWindowsHookExW(WH_CBT, test_cbt, NULL, GetCurrentThreadId());
+}
+
 int WINAPI wWinMain(HINSTANCE inst, HINSTANCE prev, PWSTR cmdline, int show) {
     (void)inst, (void)prev, (void)cmdline, (void)show;
     SetProcessDPIAware();
+    test_window_setup();
     int argc = 0;
     wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     const wchar_t *mode = NULL, *dir = NULL;
