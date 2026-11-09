@@ -62,13 +62,39 @@ Main 1.2.1, read with capstone on the decompressed NSO (`recomp/nso.py`; the ext
 - Driving the body: P13 `docs/online-native-client-plan.md` names `ActorBase::updateTrans` main+0xe8daf0,
   `updateRotation` main+0xe655d8, `RigidBodyBase::requestChangeMotionType` main+0xe8be30 (all 1.2.1, re-check each).
 
+## Done (second session, branch `claude/puppets-2-a25eef`)
+
+- Merged `origin/net-client` at 7458cc0: `TOTK_TEST_WINDOW` is in, so game rounds are allowed now (WORKER-RULES).
+- Server, step 1 of the plan, commit 4a484d3: `server/sv_puppets.c` (relay by scene, in-world state, `interest_m`,
+  20 a second per sender with a burst of 4), three hooks in `sv_room.c` (dispatch case, `player_remove` and new
+  slot, area change), `sv_room_peer`/`sv_room_send` in `sv.h`, `SV_FEATURES_GRANTED` = puppets. `tools/net_bot.c`
+  has `walk NAME CX CY CZ [JITTER_MS] [LOSS_PCT]` and `stand`; the path is `tools/net_bot_path.h` (walk, run,
+  glide with a sharp turn, climb, fall). `tests/net_server_check.py` `run_p`: 24 checks, all pass.
+- Client, step 2, commit 6b5f201: `net_set_self(NetSelf*)` and `net_puppets(NetPuppet*, max)` in `net_client.h`
+  (fake in `net_stub.c`: invented players walk circles). `runtime/net/net_puppets.c` sends at 20 Hz (keep-alive
+  every 200 ms when still), stamps on the server clock (offset from admit, then the shortest ping), takes the roster
+  for names, Zelda and in-world state, drops a puppet at once on depart or out-of-world roster, fades it out after
+  1 s of silence. `runtime/net/net_smooth.c`: Hermite with sent velocities, learned delay (60 to 300 ms),
+  damped extrapolation, correction offset, warp snap. The client now offers `OW_FEAT_PUPPETS` and reports
+  `OW_PLACE_LOADING` while `NetSelf.in_world` is 0. `tests/net_client_check.py` `run_p`: on localhost the p95 error
+  is 0.0002 m on a clean stream and 0.045 m with 20 ms jitter and 10 % loss, delay about 64 ms; the whole client
+  check passes (0 failures).
+- Not yet: nothing in the game calls `net_set_self` or `net_puppets`; no name tags, body, map markers or game round.
+  The localhost stream has almost no network jitter, so the 0.3 m figure needs a check with a delay-spike stream
+  (add one to `net_bot` walk: hold sends for 150 ms now and then).
+
 ## Plan for the next session
 
-1. Server: `sv_puppets.c`, grant `OW_FEAT_PUPPETS`, keep each player's last `self_state`, relay it as `player_state`
+1. Game side of the client: each frame in the runtime (where `net_set_local` is called, `runtime/ui/online_ui.cpp`
+   `report_local`), read the player actor (`frame_step_player_actor()` in `runtime/frame_rate.c`, position at actor
+   +0x2b4, rotation and animation to probe), velocity by difference, and call `net_set_self`; `in_world` 0 during
+   loading screens and on the title screen.
+
+0. (done) Server: `sv_puppets.c`, grant `OW_FEAT_PUPPETS`, keep each player's last `self_state`, relay it as `player_state`
    to live players whose area scene matches and whose state is playing, within `interest_m` of the sender's last
    position, at most 20 a second per sender per viewer; drop on leave, title and loading. Tests in
    `tests/net_server_check.py` with bots (`tools/net_bot.c` gains a moving puppet mode).
-2. Client: offer the feature; each frame read the local player (pos, rotation, velocity by difference, animation
+0. (done) Client: offer the feature; each frame read the local player (pos, rotation, velocity by difference, animation
    later), send `self_state` at 20 Hz; keep per-account sample buffers; smoothing; `net_puppets()` in
    `net_client.h` (account, name, character, smoothed pos and yaw, anim) and a fake in `net_stub.c`. Tests in
    `tests/net_client_check.py` against the server with moving bots, measuring the p95 error of the smoothed path.
