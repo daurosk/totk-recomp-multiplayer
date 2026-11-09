@@ -1,6 +1,6 @@
 """Assemble the release folder of docs/installer.md ("Release layout") from pinned downloads.
 
-    .venv-py314\\Scripts\\python tools\\make_release.py --out build/release/TotKMP-Setup [--zip build/release]
+    .venv-py314\\Scripts\\python tools\\make_release.py --out build/release/TotKMP-Setup [--zip build/release [--sign-key FILE]]
     .venv-py314\\Scripts\\python tools\\make_release.py --out build/release/TotKMP-Setup --prove
 
 Needs Python 3.14 (tarfile reads the MSYS2 .zst packages), uv on PATH and network access on the first run. Downloads are
@@ -22,6 +22,10 @@ cached in toolchain/release-dl/ and checked against the sha256 in PINS; a mismat
     MP_VERSION this project's own version, 0.1.0; the setup shows "0.1.0 (TotK Recomp 0.3.13)" and the game's version line
                "TotK Recomp Multiplayer 0.1.0 (TotK Recomp 0.3.13)"
     TotKMP-Setup.exe  installer/launcher/launcher.c built with llvm/ (-mwindows): starts python/pythonw.exe -m installer.gui
+    bin/totk-update.exe  installer/updater/ built with llvm/: the game's updater, copied beside totk.exe (docs/updater.md)
+
+--sign-key FILE (or the environment variable TOTKMP_UPDATE_KEY) with --zip also writes TotKMP-Update-windows.json and its
+.sig beside the zip (tools/make_update.py): the signed manifest the game's updater checks.
 
 --prove compiles the generated C and links build/release-check/totk.exe with nothing but the folder's python/, llvm/,
 runtime/ and bin/ (PATH holds the Windows system directory and those), then runs the four probes there.
@@ -444,7 +448,8 @@ def build_sources(out, pgo):
         for f in (p, p.with_suffix('.json')):
             if f.is_file():
                 shutil.copy2(f, out / 'data' / f.name)
-    copy_tree(ROOT / 'installer', out / 'installer', lambda r: '__pycache__' in r or r.startswith('launcher/'))
+    copy_tree(ROOT / 'installer', out / 'installer',
+              lambda r: '__pycache__' in r or r.startswith(('launcher/', 'updater/')))
     shutil.copy2(ROOT / 'totk.ini.example', out / 'totk.ini.example')
     shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', out / 'THIRD_PARTY_NOTICES.md')
     (out / 'VERSION').write_text(version() + '\n', encoding='utf-8')
@@ -505,6 +510,27 @@ def build_launcher(out, llvm):
          ROOT / 'installer' / 'launcher' / 'launcher.rc', '-o', res], env=env)
     run([llvm / 'bin' / 'clang.exe', '-O2', '-mwindows', '-Wall', '-Wl,-s', '-I', work,
          ROOT / 'installer' / 'launcher' / 'launcher.c', res, '-o', out / 'TotKMP-Setup.exe'], env=env)
+
+
+def build_updater(out, llvm):
+    """bin/totk-update.exe: the game's updater (installer/updater/, docs/updater.md) with this release's MP_VERSION
+    and the release key's public half (installer/updater/key.h). The setup copies it beside totk.exe."""
+    work = MAIN_ROOT / 'build' / 'release-check' / 'updater'
+    work.mkdir(parents=True, exist_ok=True)
+    env = clean_env(llvm / 'bin')
+    src = ROOT / 'installer' / 'updater'
+    mono = ROOT / 'online' / 'third_party' / 'monocypher'
+    res = work / 'update_rc.o'
+    run([llvm / 'bin' / 'llvm-windres.exe', '-I', ROOT / 'runtime', '-I', src, '-O', 'coff', src / 'update.rc',
+         '-o', res], env=env)
+    mp = (ROOT / 'MP_VERSION').read_text(encoding='utf-8').strip()
+    run([llvm / 'bin' / 'clang.exe', '-O2', '-mwindows', '-municode', '-Wall', '-Wl,-s', f'-DTOTKMP_VERSION="{mp}"',
+         '-I', mono, src / 'update.c', src / 'json.c', mono / 'monocypher.c', mono / 'monocypher-ed25519.c', res,
+         '-lwinhttp', '-lbcrypt', '-lcomctl32', '-lshell32', '-o', out / 'bin' / 'totk-update.exe'], env=env)
+    r = subprocess.run([str(out / 'bin' / 'totk-update.exe'), '--selftest'], capture_output=True, text=True, timeout=60)
+    if r.returncode:
+        sys.exit(f'totk-update.exe --selftest failed:\n{r.stdout}')
+    print(f'totk-update.exe {mp}: selftest passed')
 
 
 # ---- checks ----------------------------------------------------------------------------------------------------------
@@ -596,6 +622,9 @@ def main():
     ap.add_argument('--out', type=Path, required=True, help='release folder (replaced)')
     ap.add_argument('--zip', type=Path, help='also write the folder as this zip; a folder (no .zip suffix) gets '
                                              'the name TotKMP-Setup-<MP_VERSION>-windows.zip inside it')
+    ap.add_argument('--sign-key', type=Path, help='with --zip: also write the signed update manifest beside the zip '
+                                                  '(tools/make_update.py; without it the environment variable '
+                                                  'TOTKMP_UPDATE_KEY is used when set)')
     ap.add_argument('--prove', action='store_true', help='only run the compile-and-probe check on an existing folder')
     ap.add_argument('--cpu', choices=('v2', 'v3'), default='v3',
                     help='--prove: build and run the check for this CPU level (default v3)')
@@ -616,13 +645,20 @@ def main():
     runtime_lib(out, llvm, pgo)
     build_sources(out, pgo)
     build_launcher(out, llvm)
+    build_updater(out, llvm)
     collect_licenses(out)
     check_folder(out)
     check_bundle(out)
     sizes(out)
     if args.zip:
         zip_path = args.zip.resolve()
-        write_zip(out, zip_path if zip_path.suffix == '.zip' else zip_path / zip_name())
+        zip_path = zip_path if zip_path.suffix == '.zip' else zip_path / zip_name()
+        write_zip(out, zip_path)
+        if args.sign_key or os.environ.get('TOTKMP_UPDATE_KEY'):
+            import make_update
+            make_update.write(zip_path, zip_path.parent, args.sign_key)
+        else:
+            print('no signing key: the update manifest is not written (tools/make_update.py, docs/updater.md)')
 
 
 if __name__ == '__main__':

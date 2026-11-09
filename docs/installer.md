@@ -24,6 +24,7 @@ The install folder (`main.c` `portable_paths()` reads this layout; it stays port
 ```
 <install folder>/
   totk.exe, SDL3.dll, libopus-0.dll, totk_xlate.exe
+  totk-update.exe                the updater (docs/updater.md); update/ holds its log, the current setup and its temp
   nvngx_dlss.dll                 NVIDIA DLSS, downloaded by the setup's DLSS step when the player keeps it ticked
   totk.ini                       language; the other keys as commented defaults (totk.ini.example)
   exefs/, romfs/                 extracted from the player's files
@@ -37,7 +38,8 @@ The install folder (`main.c` `portable_paths()` reads this layout; it stays port
 
 ## Updating the port
 
-The player runs a newer installer on the same folder. It reads `totk-install.json`, keeps `romfs/`, `exefs/`,
+The game updates itself: `totk-update.exe` beside `totk.exe` offers a newer release at start and runs the new setup's
+command line on the folder ([updater.md](updater.md)). By hand, the player runs a newer installer on the same folder. It reads `totk-install.json`, keeps `romfs/`, `exefs/`,
 `shared-fonts/`, `profile/` and `totk.ini` after checking their hashes, rebuilds `totk.exe` and re-prepares the
 shaders. A newer release that changes nothing game-derived skips the rebuild. The window starts with the last install folder
 and the base, update, keys and firmware paths it ran with (paths only, never the keys file's contents), kept in
@@ -157,7 +159,7 @@ recomp/, tools/       the lifter and the build, extraction and shader scripts th
 llvm/                 llvm-mingw, x86_64-only subset (Apache-2.0 with LLVM exception; mingw-w64 parts permissive)
 runtime/              libtotkrt.a, libtotkrt-v2.a and the headers the generated code and modules.c/romfs.c/patches.c
                       include
-bin/                  totk_xlate.exe, hactool.exe, SDL3.dll, libopus-0.dll, ninja.exe
+bin/                  totk_xlate.exe, hactool.exe, SDL3.dll, libopus-0.dll, ninja.exe, totk-update.exe
 data/                 shader_list.tsv (MacNativeGames, MIT); pgo-<ver>.profdata + .json, the execution profile an
                       update's code and the runtime libraries compile with (building.md, "Profile-guided build")
 THIRD_PARTY_NOTICES.md

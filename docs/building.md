@@ -268,6 +268,17 @@ The online wire (`online/proto/`, [online-wire.md](online-wire.md)): `.venv\Scri
 
 The online client (`runtime/net/net_client.c`): `.venv\Scripts\python tests\net_client_check.py` builds the server, the bot and the client with the runtime replaced by shims (`tests/net_client_main.c`), and drives the client against the real server on localhost: join, the player list and positions, chat on every channel, teams, teleports both ways, every host tool, a reconnect within the hold, kicks, bans, a password, a full room, another protocol version and a changed server key (about 30 s). Every change to `runtime/net/` passes it. No game files.
 
+Test runs of the game never take the user's focus or mouse. Every game started for a test sets
+`TOTK_TEST_WINDOW=<slot>` (0, 1 or 2; `tools/run_game.py` sets it by run slot unless `--show`): the window opens on the
+first monitor that is not the primary one, in that third of its working area counted from the top, at the largest 16:9
+size whose whole frame fits there, measured at that monitor's own DPI. It is shown without activation and never raised,
+the cursor is never confined or hidden, F11 and the window size setting leave it in place, and the log line
+`gfx: test window slot` gives its rectangle. With no second monitor it uses the primary one. Input for the online UI
+goes through `TOTK_TEST_INPUT=<file>`, not through the window: the test script appends lines to the file and the game
+acts on each new one within 0.2 s: `type <text>`, `enter`, `chat <text>` (type, then enter), `esc`, `wheel-down`,
+`wheel-up`, `wheel <n>` (a scripted wheel screen, 0 closes it), `confirm`, `list`, `yes`, `no` (the list is at
+`test_input_line` in `runtime/ui/online_ui.cpp`). Close the game when the run ends.
+
 The server (`server/`, [server.md](server.md)): `.venv\Scripts\python tests\net_server_check.py` builds the server and the test bot (`tools/net_bot.c`) with undefined-behaviour checks that trap, runs three servers on free localhost ports and drives them with bots: sessions, chat, teams, teleports, host tools, limits and hostile clients (about a minute; `--release` tests the optimised build). Every change to `server/` or `online/proto/` passes it. CI runs it on Linux.
 
 The actors add-on ([online-wire.md](online-wire.md) 9.1): `.venv\Scripts\python tests\actor_lab.py` builds the replay lab (`tests/actor_lab.c`) with the server's actor library and plays every case of `tests/actor_cases/` on a virtual clock: bot timelines that reproduce the situations the old port's owner rules were settled on, each checked for the owner changes and messages it must give, and the steady-play bar of under 5 owner changes a minute (a few seconds). `tests\actor_server_check.py` then drives the add-on through the real server with bots (about 20 s). Every change to `server/sv_actors.c`, `server/sv_owner.c` or `online/proto/classes.txt` passes both; CI runs them on Linux and Windows.

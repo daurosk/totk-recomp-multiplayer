@@ -8,7 +8,7 @@ with the bundled clang (hostcheck.c).
 
 Install folder: exefs/, romfs/ (romfs.bin, index.json), profile/, shared-fonts/ (Chinese and Korean text), totk.exe
 and its DLLs, nvngx_dlss.dll (with --dlss), romfs-index.bin, romfs-patches/, romfs-patches-xbox/,
-romfs-patches-xbox-label/, romfs-patches-pc/, totk_xlate.exe, the
+romfs-patches-xbox-label/, romfs-patches-pc/, totk_xlate.exe, totk-update.exe (the updater), the
 shader state of totk.exe --prepare-shaders, totk.ini, totk-install.json.
 Temp folder (<temp>/<dest name>-<hash>): check/ (ExeFS of both inputs, the host check), unpacked/ (the NSP of an NSZ
 or XCZ input until the extraction is done), gen/ (C), build/ (objects), logs/. The cleanup keeps gen/, build/ and
@@ -1246,7 +1246,24 @@ class Cleanup(Step):
             remove(ctx.temp / name)
         romfs_problem(dest / 'romfs', expected_update(ctx))
         write_rebuild_command(ctx)
+        install_updater(ctx)
         return {}
+
+
+def install_updater(ctx):
+    """totk-update.exe beside the game (docs/updater.md): totk.exe runs it at start to offer a newer release. Copied
+    on every run, so a release that changes only the updater still brings it. During an update the running updater
+    is a copy in update/run, so this file is free. A copy that fails (the file held open) warns: the game runs without
+    a new updater until the next run of the setup."""
+    src = getattr(ctx.layout, 'updater', None)
+    if not src or not src.is_file():
+        return
+    target = ctx.dest / src.name
+    try:
+        if not target.is_file() or file_sha256(target) != file_sha256(src):
+            replace_file(src, target)
+    except OSError as e:
+        ctx.reporter.warning('warn.updater_not_copied', path=str(target), detail=str(e))
 
 
 # Puts the release folder (the argument after -c) on sys.path and runs installer.gui with the rest. `-m installer.gui`

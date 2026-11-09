@@ -103,6 +103,7 @@
  "warn.lang_needs_fonts": "Text in {lang} needs the Switch system fonts, and none were given. The game will not start in this language until they are added. Choose the firmware folder (Contents/registered), or see \"Switch system fonts\" in docs/installer.md.",
  "warn.npdm_differs": "main.npdm differs from the reference {version} dump; only the code modules are used.",
  "warn.cheats_skipped": "The cheats of the mods folder that change the game's code could not be built; the game installs without them. Details: {log}",
+ "warn.updater_not_copied": "The game's updater could not be copied to {path}; the game starts without the new one until the setup runs again. ({detail})",
  "warn.exefs_skipped": "The mods' ExeFS patches (.ips, .pchtxt) could not be built; the game installs without them. Details: {log}",
  "warn.xbox_prompts_failed": "The Xbox or PC button prompts could not be prepared (exit code {code}); the game keeps the Switch prompts. Details: {log}",
  "warn.shaders_skipped": "The graphics driver crashed while building some shaders, so {count} were left out of the preparation. The game builds them when it first needs them, and the driver may crash there too; a driver update may fix it. Details: {log}",

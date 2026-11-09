@@ -31,6 +31,7 @@
 #include "host.h"
 #include "platform/platform.h"
 #include "sha256.h"
+#include "update_start.h"
 
 #define MAX_MODULES 16
 
@@ -523,6 +524,8 @@ int main(int argc, char **argv) {
            rt_game_version % 10);
     // A restart from the settings menu (gfx_present.c gfx_window_closed) starts this process while the one it replaces
     // is still exiting: its log, RomFS and saves are free once it is gone.
+    char restarting[48];
+    int restarted = plat_getenv("TOTK_RESTART_WAIT", restarting, sizeof restarting) > 0;   // cleared by the wait below
     if (plat_restart_wait(30000) < 0) rt_log("restart: the previous process still runs after 30 s; starting anyway");
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
@@ -566,6 +569,8 @@ int main(int argc, char **argv) {
     log_open(!mode);
     if (!mode) {
         cfg.boot = cfg.seconds > 0;   // --seconds starts the game like --boot, with its checkpoints
+        // the update prompt (update_start.c): only when the player starts the game, before its window opens
+        if (!cfg.boot && !restarted) update_at_start();
         discord_init();   // the Rich Presence thread (discord_rpc.c); it reads totk.ini itself and idles while off
         playtime_init();  // the play time thread (playtime.c): the Game tab's play time across runs
         rt_boot();
