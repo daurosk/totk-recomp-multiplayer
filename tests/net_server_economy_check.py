@@ -60,7 +60,9 @@ def test_join(srv, bots):
     check(w is not None and w['seq'] == 0 and w['rupees'] == 100, 'a joining game is told its rupees (the start amount)')
     l = bots.expect('alice', 'ledger', 2)
     check(l is not None and l['lights_found'] == 0 and l['seeds_found'] == 0, 'and the ledger, empty at first')
-    check(bots.none('alice', 'sky_set', 0.3), 'no clock to tell while the leader has not sent one')
+    s = bots.expect('alice', 'sky_set', 2)
+    check(s and s['leader'] == a['account'] and s['info']['day'] == 0xFFFFFFFF,
+          'the first game is told it leads, and that there is no clock yet')
     b = bots.connect('bob', 'seedBob', 'Bob', features=ECONOMY | SKY)
     check(b.get('features') == ECONOMY | SKY, 'a second game is granted the same')
     c = bots.connect('carol', 'seedCarol', 'Carol', features=0)

@@ -933,8 +933,12 @@ static player *sky_leader(void) {
     return best;
 }
 
+/* Day SV_SKY_NONE says that nobody has sent a clock yet: the message then only tells who leads. */
+#define SV_SKY_NONE 0xFFFFFFFFu
+
 static void send_sky(player *to, uint64_t leader) {
     ow_sky_set m = { .leader = leader, .info = G.sky_info };
+    if (!G.sky_known) m.info.day = SV_SKY_NONE;
     send_to(to, OW_T_sky_set, &m);
 }
 
@@ -945,7 +949,7 @@ static void sky_update_leader(void) {
     if (now_leader == G.sky_leader) return;
     G.sky_leader = now_leader;
     if (l) sv_log("%s leads the sky clock", l->nick);
-    if (!l || !G.sky_known) return;
+    if (!l) return;
     for (int i = 0; i < OW_PLAYERS_MAX; i++)
         if (has_feature(&G.p[i], OW_FEAT_SKY)) send_sky(&G.p[i], now_leader);
 }
@@ -966,7 +970,7 @@ static void send_economy_state(player *p) {
         send_wallet(p, 0, sv_wallet_get(p->account), 0);
         send_ledger(p);
     }
-    if ((p->features & OW_FEAT_SKY) && G.sky_known && G.sky_leader) send_sky(p, G.sky_leader);
+    if ((p->features & OW_FEAT_SKY) && G.sky_leader) send_sky(p, G.sky_leader);
 }
 
 /* ---- the handshake ---- */

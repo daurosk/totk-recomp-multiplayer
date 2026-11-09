@@ -138,6 +138,35 @@ void net_team_leave(void);
 // ---- host and moderators (the server checks the role again)
 int net_host_action(NetHostAction action, uint32_t target, const char *text);
 
+// ---- the shared economy (feature switch net_economy in totk.ini, off by default; the server must have it too)
+// Rupees belong to the account and the server decides them: the game asks for a change and takes the answer. A Light of
+// Blessing or a Korok seed one player finds counts for every player's ledger; what a player spends is their own. One
+// player, the leader (the first to have joined), sets the clock and the Blood Moon for everyone. All of these are 0 or
+// do nothing while net_economy_on() is 0. The serial of each answer rises with every update from the server.
+typedef enum { NET_WALLET_SPEND = 0, NET_WALLET_EARN = 1, NET_WALLET_TRADE = 2, NET_WALLET_STAKE = 3 } NetWalletCause;
+typedef struct {
+    uint32_t lights_found, lights_spent, seeds_found, seeds_spent;
+} NetLedger;
+typedef struct {
+    uint32_t day;
+    float hour;                     // 0 to 24
+    uint8_t blood_moon_due;
+    uint8_t is_leader;              // this game sets the clock
+} NetSky;
+int net_economy_on(void);        // the switch is on and the server granted the economy and the sky clock
+// The rupees the server last said the account has. 0 until it said. *serial changes whenever they did.
+int net_wallet_get(uint32_t *rupees, uint32_t *serial);
+// Asks to change the rupees (delta may be negative). The answer arrives in net_wallet_get, possibly cut down.
+int net_wallet_ask(int32_t delta, NetWalletCause cause);
+int net_ledger_get(NetLedger *out, uint32_t *serial);
+int net_ledger_find(int korok_seed, uint32_t key);   // this game found one, named by its GameData key hash
+int net_ledger_spend(int korok_seed, uint32_t count);
+// The leader's clock, as the server last relayed it: 0 until the leader sent one. The leader's own game gets no clock
+// back, only is_leader; it sends its own with net_sky_send.
+int net_sky_get(NetSky *out, uint32_t *serial);
+int net_sky_is_leader(void);
+int net_sky_send(uint32_t day, float hour, int blood_moon_due);   // only the leader's is passed on
+
 // ---- events for the UI. Fills out with up to max events, oldest first; returns how many.
 int net_poll_events(NetEvent *out, int max);
 

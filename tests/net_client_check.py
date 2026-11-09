@@ -12,6 +12,7 @@ replaced by small shims, no game) with MSYS2 Clang or $CC, then:
   kick, ban), a reconnect within the hold that the others do not see, a kick and a ban of the client from the console,
   the server going away (lost connection after the hold) and another server on the same address (a changed key).
 - B, a room with a password and two places: no password, a wrong one, the right one, then a full room.
+- ECO, the shared economy through the client: off unless net_economy is on, then wallet, ledger and the sky clock.
 - A fake server of another protocol version, the client with no address, and TOTK_NET_FAKE=1.
 
 Each check prints ok or FAIL; the exit code is the number of failures. docs/online-ui.md describes the client.
@@ -454,6 +455,93 @@ def ends_a(srv, bots, cl, addr, exe_srv, tmp, port, settings):
         other.stop()
 
 
+def eco(cl):
+    cl.cmd('eco')
+    return cl.expect('eco', 3) or {}
+
+
+def run_eco(exe_srv, exe_bot, exe_cl, tmp):
+    """The shared economy through the client: off unless the switch is on, then wallet, ledger and the sky clock."""
+    port = free_port()
+    addr = f'127.0.0.1:{port}'
+    srv = Server(exe_srv, tmp / 'eco', port, dict(open=True, hold_seconds=2, max_per_ip=64, max_pending_per_ip=16,
+                                                  connects_per_minute=100000, new_accounts_per_hour=1000,
+                                                  start_rupees=100, wallet_earn_max=1000, motd='eco'))
+    bots = Bots(exe_bot, port)
+    off = Client(exe_cl, tmp / 'profile-eco-off')
+    on = Client(exe_cl, tmp / 'profile-eco-on', env={'TOTK_NET_ECONOMY': '1'})
+    try:
+        ev = off.online(addr, 'Off')
+        check(ev is not None and ev['state'] == ONLINE, 'economy off: the client joins')
+        e = eco(off)
+        check(e.get('on') == 0 and e.get('wallet') == 0, 'economy off: the game sees no economy (the server grants nothing unasked)')
+        off.cmd('wallet 5 1')
+        check(off.ret('wallet') == 0, 'economy off: a wallet request is not sent')
+        off.cmd('disconnect')
+        off.drain()
+        ev = on.online(addr, 'On')
+        check(ev is not None and ev['state'] == ONLINE, 'economy on: the client joins')
+        e = None
+        end = time.time() + 5
+        while time.time() < end:
+            e = eco(on)
+            if e.get('wallet') and e.get('ledger') and e.get('leader'):
+                break
+            time.sleep(0.2)
+        check(e and e['on'] == 1 and e['wallet'] == 1 and e['rupees'] == 100, 'economy on: the start rupees arrive')
+        check(e and e['ledger'] == 1 and e['lights_found'] == 0, 'and the ledger')
+        check(e and e['leader'] == 1, 'the first to join is told it leads the sky clock')
+        on.cmd('wallet -30 0')
+        check(on.ret('wallet') == 1, 'a wallet request is sent')
+        for _ in range(25):
+            e = eco(on)
+            if e['rupees'] == 70:
+                break
+            time.sleep(0.2)
+        check(e['rupees'] == 70, f'and the answer sets the rupees ({e["rupees"]})')
+        on.cmd('wallet -500 0')
+        for _ in range(25):
+            e = eco(on)
+            if e['rupees'] == 0:
+                break
+            time.sleep(0.2)
+        check(e['rupees'] == 0, 'a spend over the balance is cut by the server')
+        on.cmd('lfind 0x1234')
+        for _ in range(25):
+            e = eco(on)
+            if e['lights_found'] == 1:
+                break
+            time.sleep(0.2)
+        check(e['lights_found'] == 1, 'a Light found shows in the ledger')
+        on.cmd('lspend 1')
+        for _ in range(25):
+            e = eco(on)
+            if e['lights_spent'] == 1:
+                break
+            time.sleep(0.2)
+        check(e['lights_spent'] == 1, 'and one spent')
+        b = bots.connect('bot', 'seedEcoBot', 'Bot', features=16 | 64)
+        check(b.get('ev') == 'admit', 'a bot joins the same room')
+        bots.send('bot', 'ledger_note', what=2, key=0x777, count=1)
+        for _ in range(25):
+            e = eco(on)
+            if e['seeds_found'] == 1:
+                break
+            time.sleep(0.2)
+        check(e['seeds_found'] == 1 and e['seeds_spent'] == 0, "a Korok seed another player finds counts for this game too")
+        on.cmd('skysend 7 20.5 1')
+        s = bots.expect('bot', 'sky_set', 4, pred=lambda ev: ev['info']['day'] == 7)
+        check(s and s['info']['day'] == 7 and s['info']['blood_moon_due'] == 1, "the leader's clock reaches the others")
+        bots.send('bot', 'sky', **{'info.day': 99, 'info.hour': 1.0, 'info.blood_moon_due': 0})
+        time.sleep(0.5)
+        check(eco(on)['sky'] == 0, 'a clock from a game that does not lead does not reach the leader')
+    finally:
+        off.stop()
+        on.stop()
+        bots.stop()
+        srv.stop()
+
+
 def run_b(exe_srv, exe_bot, exe_cl, tmp):
     port = free_port()
     addr = f'127.0.0.1:{port}'
@@ -577,6 +665,7 @@ def main():
         t0 = time.time()
         run_a(exe_srv, exe_bot, exe_cl, tmp)
         run_b(exe_srv, exe_bot, exe_cl, tmp)
+        run_eco(exe_srv, exe_bot, exe_cl, tmp)
         run_c(exe_cl, tmp)
         print(f'{len(sc.FAILS)} failures in {time.time() - t0:.0f} s')
         for f in sc.FAILS:

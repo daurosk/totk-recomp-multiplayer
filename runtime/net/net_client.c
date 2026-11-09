@@ -116,6 +116,9 @@ typedef struct {
         ow_summon summon;
         ow_mod_action mod_action;
         ow_announce announce;
+        ow_wallet_ask wallet_ask;
+        ow_ledger_note ledger_note;
+        ow_sky sky;
     } m;
 } Cmd;
 
@@ -132,6 +135,14 @@ static struct {
     float pos[3];
     int have_pos;
     uint8_t character;
+    int economy_wanted;             // net_economy was on when net_connect ran
+    // the economy, as the server last said (net_client.h)
+    uint32_t features;              // the add-ons the server granted this session
+    int wallet_known, ledger_known, sky_known, sky_clock;   // sky_known: who leads; sky_clock: a clock came
+    uint32_t rupees, wallet_serial, ledger_serial, sky_serial, wallet_seq;
+    NetLedger ledger;
+    NetSky sky;
+    uint64_t sky_leader;
     int test_drop;                  // tests: close the socket as if the network failed (net_test_drop)
     // the network's news
     NetState state;
@@ -299,6 +310,9 @@ static union {
     ow_tp_result tp_result;
     ow_go_to go_to;
     ow_mod_done mod_done;
+    ow_wallet wallet;
+    ow_ledger ledger;
+    ow_sky_set sky_set;
 } M;
 
 static const ow_roster_row *row_of(uint64_t account) {
@@ -684,7 +698,10 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         plat_mutex_lock(&S.mx);
         uint8_t ch = S.character;
         plat_mutex_unlock(&S.mx);
-        e = ow_hs_client_challenge(&C.hs, &M.challenge, C.have_pin ? C.pin : NULL, &C.id, nick, ch, claim, OW_FEAT_CORE, &pr);
+        plat_mutex_lock(&S.mx);
+        uint32_t offer = S.economy_wanted ? OW_FEAT_ECONOMY | OW_FEAT_SKY : OW_FEAT_CORE;
+        plat_mutex_unlock(&S.mx);
+        e = ow_hs_client_challenge(&C.hs, &M.challenge, C.have_pin ? C.pin : NULL, &C.id, nick, ch, claim, offer, &pr);
         if (!e) e = ow_hs_seal(&C.hs, &C.link);
         ow_hs_wipe(&C.hs);
         wipe(claim, sizeof claim);
@@ -708,6 +725,10 @@ static int on_frame(const ow_frame *f, unsigned gen) {
     case OW_T_admit:
         if (C.phase != P_PROOF) break;
         ow_link_set_features(&C.link, M.admit.features);
+        plat_mutex_lock(&S.mx);
+        S.features = M.admit.features;
+        S.wallet_known = S.ledger_known = S.sky_known = S.sky_clock = 0;
+        plat_mutex_unlock(&S.mx);
         if (!C.have_pin) pin_save(C.pin);
         if (C.admitted && C.account != M.admit.account) room_clear();
         C.account = M.admit.account;
@@ -792,6 +813,32 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         break;
     }
     case OW_T_mod_done: on_mod_done(); break;
+    case OW_T_wallet:
+        plat_mutex_lock(&S.mx);
+        S.rupees = M.wallet.rupees;
+        S.wallet_known = 1;
+        S.wallet_serial++;
+        plat_mutex_unlock(&S.mx);
+        break;
+    case OW_T_ledger:
+        plat_mutex_lock(&S.mx);
+        S.ledger = (NetLedger){M.ledger.lights_found, M.ledger.lights_spent, M.ledger.seeds_found, M.ledger.seeds_spent};
+        S.ledger_known = 1;
+        S.ledger_serial++;
+        plat_mutex_unlock(&S.mx);
+        break;
+    case OW_T_sky_set:
+        plat_mutex_lock(&S.mx);
+        S.sky.day = M.sky_set.info.day;
+        S.sky.hour = M.sky_set.info.hour;
+        S.sky.blood_moon_due = M.sky_set.info.blood_moon_due;
+        S.sky_leader = M.sky_set.leader;
+        S.sky.is_leader = M.sky_set.leader == C.account;
+        S.sky_known = 1;
+        S.sky_clock = M.sky_set.info.day != 0xFFFFFFFFu;   // that day: the server has no clock yet
+        S.sky_serial++;
+        plat_mutex_unlock(&S.mx);
+        break;
     default: break;   // markers and the rest have no place in this release's UI
     }
     return END_NONE;
@@ -1133,6 +1180,11 @@ int net_enabled(void) {
 }
 
 int net_connect(const NetConfig *cfg) {
+    if (!fake()) {
+        plat_mutex_lock(&S.mx);
+        S.economy_wanted = cfg_bool("TOTK_NET_ECONOMY");
+        plat_mutex_unlock(&S.mx);
+    }
     if (fake()) return net_fake_connect(cfg);
     if (!cfg || !cfg->address[0]) {
         plat_mutex_lock(&S.mx);
@@ -1484,4 +1536,97 @@ void net_test_drop(void) {
     plat_mutex_lock(&S.mx);
     S.test_drop = 1;
     plat_mutex_unlock(&S.mx);
+}
+
+// ---- the shared economy (net_client.h). Updates come from the network thread under S.mx.
+
+int net_economy_on(void) {
+    if (fake()) return 0;
+    plat_mutex_lock(&S.mx);
+    int on = S.state == NET_ONLINE && (S.features & (OW_FEAT_ECONOMY | OW_FEAT_SKY)) == (OW_FEAT_ECONOMY | OW_FEAT_SKY);
+    plat_mutex_unlock(&S.mx);
+    return on;
+}
+
+int net_wallet_get(uint32_t *rupees, uint32_t *serial) {
+    if (!net_economy_on()) return 0;
+    plat_mutex_lock(&S.mx);
+    int known = S.wallet_known;
+    if (rupees) *rupees = S.rupees;
+    if (serial) *serial = S.wallet_serial;
+    plat_mutex_unlock(&S.mx);
+    return known;
+}
+
+int net_wallet_ask(int32_t delta, NetWalletCause cause) {
+    if (!net_economy_on() || !delta) return 0;
+    Cmd c;
+    memset(&c, 0, sizeof c);
+    c.type = OW_T_wallet_ask;
+    plat_mutex_lock(&S.mx);
+    c.m.wallet_ask.seq = ++S.wallet_seq;
+    plat_mutex_unlock(&S.mx);
+    c.m.wallet_ask.delta = delta;
+    c.m.wallet_ask.cause = (uint8_t)cause;
+    return push(&c);
+}
+
+int net_ledger_get(NetLedger *out, uint32_t *serial) {
+    if (!net_economy_on()) return 0;
+    plat_mutex_lock(&S.mx);
+    int known = S.ledger_known;
+    if (out) *out = S.ledger;
+    if (serial) *serial = S.ledger_serial;
+    plat_mutex_unlock(&S.mx);
+    return known;
+}
+
+int net_ledger_find(int korok_seed, uint32_t key) {
+    if (!net_economy_on() || !key) return 0;
+    Cmd c;
+    memset(&c, 0, sizeof c);
+    c.type = OW_T_ledger_note;
+    c.m.ledger_note.what = korok_seed ? OW_LEDGER_SEED_FOUND : OW_LEDGER_LIGHT_FOUND;
+    c.m.ledger_note.key = key;
+    c.m.ledger_note.count = 1;
+    return push(&c);
+}
+
+int net_ledger_spend(int korok_seed, uint32_t count) {
+    if (!net_economy_on() || !count) return 0;
+    Cmd c;
+    memset(&c, 0, sizeof c);
+    c.type = OW_T_ledger_note;
+    c.m.ledger_note.what = korok_seed ? OW_LEDGER_SEED_SPENT : OW_LEDGER_LIGHT_SPENT;
+    c.m.ledger_note.count = (uint16_t)(count > 0xFFFF ? 0xFFFF : count);
+    return push(&c);
+}
+
+int net_sky_get(NetSky *out, uint32_t *serial) {
+    if (!net_economy_on()) return 0;
+    plat_mutex_lock(&S.mx);
+    int known = S.sky_clock;
+    if (out) *out = S.sky;
+    if (serial) *serial = S.sky_serial;
+    plat_mutex_unlock(&S.mx);
+    return known;
+}
+
+int net_sky_is_leader(void) {
+    if (!net_economy_on()) return 0;
+    plat_mutex_lock(&S.mx);
+    int lead = S.sky_known && S.sky.is_leader;
+    plat_mutex_unlock(&S.mx);
+    return lead;
+}
+
+int net_sky_send(uint32_t day, float hour, int blood_moon_due) {
+    if (!net_economy_on()) return 0;
+    Cmd c;
+    memset(&c, 0, sizeof c);
+    c.type = OW_T_sky;
+    c.m.sky.info.day = day;
+    c.m.sky.info.hour = hour;
+    c.m.sky.info.blood_moon_due = blood_moon_due ? 1 : 0;
+    return push(&c);
 }

@@ -14,6 +14,9 @@
  *   host ACTION ID [TEXT...]            net_host_action with a NetHostAction number
  *   pos X Y Z                           net_set_local
  *   drop                                net_test_drop: the socket closes as if the network failed
+ *   wallet DELTA CAUSE | lfind KEY | sfind KEY | lspend N | sspend N | skysend DAY HOUR DUE
+ *                                       net_wallet_ask, net_ledger_find (Light, Korok seed), net_ledger_spend, net_sky_send
+ *   eco                                 {"ev":"eco", on, wallet, rupees, ledger, sky, leader}: the economy as the game sees it
  *   dump                                {"ev":"dump", state, self, status, players, teams}
  *   echo TEXT | quit
  * Out: {"ev":"event", type, player, request, accepted, pos, name, text} for each net_poll_events event,
@@ -52,6 +55,10 @@ const char rt_port_version[] = "test";
 const RtConfig *rt_config(void) { return &g_rc; }
 
 const char *cfg_get(const char *name) { return getenv(name); }
+int cfg_bool(const char *name) {
+    const char *v = getenv(name);
+    return v && *v && strcmp(v, "0");
+}
 
 void rt_log(const char *fmt, ...) {
     va_list ap;
@@ -298,6 +305,23 @@ static int run(char *line) {
         net_test_drop();
     } else if (!strcmp(cmd, "dump")) {
         dump();
+    } else if (!strcmp(cmd, "wallet")) {
+        ret(cmd, net_wallet_ask((int32_t)atoi(a), (NetWalletCause)atoi(b)));
+    } else if (!strcmp(cmd, "lfind") || !strcmp(cmd, "sfind")) {
+        ret(cmd, net_ledger_find(cmd[0] == 's', (uint32_t)strtoul(a, NULL, 0)));
+    } else if (!strcmp(cmd, "lspend") || !strcmp(cmd, "sspend")) {
+        ret(cmd, net_ledger_spend(cmd[0] == 's', (uint32_t)atoi(a)));
+    } else if (!strcmp(cmd, "skysend")) {
+        ret(cmd, net_sky_send((uint32_t)atoi(a), (float)atof(b), atoi(rest_of(line, 3))));
+    } else if (!strcmp(cmd, "eco")) {
+        uint32_t rupees = 0, ws = 0, ls = 0, ss = 0;
+        NetLedger l = {0};
+        NetSky s = {0};
+        int w = net_wallet_get(&rupees, &ws), lk = net_ledger_get(&l, &ls), sk = net_sky_get(&s, &ss);
+        printf("{\"ev\":\"eco\",\"on\":%d,\"wallet\":%d,\"rupees\":%u,\"ledger\":%d,\"lights_found\":%u,\"lights_spent\":%u,"
+               "\"seeds_found\":%u,\"seeds_spent\":%u,\"sky\":%d,\"day\":%u,\"hour\":%g,\"due\":%u,\"leader\":%d}\n",
+               net_economy_on(), w, rupees, lk, l.lights_found, l.lights_spent, l.seeds_found, l.seeds_spent, sk, s.day,
+               s.hour, s.blood_moon_due, net_sky_is_leader());
     }
     return 0;
 }

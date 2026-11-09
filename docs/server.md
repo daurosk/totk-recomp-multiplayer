@@ -232,7 +232,8 @@ change. The server decides; a game's change is a request.
 The `sky` add-on makes one Blood Moon for the room. The leader is the player who joined first of those here now; when
 they leave, the next to have joined leads and everyone is told. Only the leader's clock (day, hour of the day, Blood
 Moon due) is passed on; a clock from anyone else, or with an hour outside 0 to 24, is dropped. A game that joins is
-told the clock and who leads.
+told the clock and who leads (while no clock has come yet, `sky_set` carries the day 4294967295 and only names the
+leader).
 
 The player list marks a player away (`afk`) after `afk_seconds` without moving, chatting or a request such as a
 team or teleport request, and for as long as the player's connection is held; the mark goes when they act again.
