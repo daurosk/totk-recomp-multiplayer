@@ -78,6 +78,8 @@ To update, run a newer setup on the same folder; saves and settings are kept. Se
 
 TotK Recomp Multiplayer is built on [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) by valentderah. If you enjoy TotK Recomp, consider supporting him: [donationalerts.com/r/valentderah](https://www.donationalerts.com/r/valentderah).
 
+TotK Recomp Multiplayer is inspired by Kirbymimi's TOTK Online mod, but it is a fundamentally different project: it targets the recomp, not an emulator. Because of that mod's license, none of its code or assets is used here; everything is written from scratch for the recomp.
+
 TotK Recomp builds on the projects below. What was taken from each, with its license, is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 - [LAS Recomp](https://github.com/peiikai/LASRecomp)
