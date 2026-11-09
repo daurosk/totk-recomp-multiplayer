@@ -266,6 +266,8 @@ exe's own version first, then of the other one.
 
 The online wire (`online/proto/`, [online-wire.md](online-wire.md)): `.venv\Scripts\python tests\net_proto_check.py` compiles the codec with Monocypher using MSYS2 Clang, compares its tables with online-wire.md, runs round trips, 1 to 7 byte chunks, truncation, flipped bytes, oversize, features, sealing and the handshake, then fuzzes for 10 minutes on 4 processes (`--fuzz-seconds 30` for a quick run). Every change to `online/proto/` passes it. No game files.
 
+The online client (`runtime/net/net_client.c`): `.venv\Scripts\python tests\net_client_check.py` builds the server, the bot and the client with the runtime replaced by shims (`tests/net_client_main.c`), and drives the client against the real server on localhost: join, the player list and positions, chat on every channel, teams, teleports both ways, every host tool, a reconnect within the hold, kicks, bans, a password, a full room, another protocol version and a changed server key (about 30 s). Every change to `runtime/net/` passes it. No game files.
+
 The server (`server/`, [server.md](server.md)): `.venv\Scripts\python tests\net_server_check.py` builds the server and the test bot (`tools/net_bot.c`) with undefined-behaviour checks that trap, runs three servers on free localhost ports and drives them with bots: sessions, chat, teams, teleports, host tools, limits and hostile clients (about a minute; `--release` tests the optimised build). Every change to `server/` or `online/proto/` passes it. CI runs it on Linux.
 
 Shaders: `.venv-py314\Scripts\python tools\shader_census.py --version <ver> --translate` extracts every Maxwell shader

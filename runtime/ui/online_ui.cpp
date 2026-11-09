@@ -570,8 +570,9 @@ static void on_events() {
             case NET_EV_MUTED: online_toast(e.accepted ? "You were muted" : "You were unmuted", 2); break;
             case NET_EV_ROLE_CHANGED: online_toast(e.accepted ? "You are now a moderator" : "You are no longer a moderator", 0); break;
             case NET_EV_SERVER_MESSAGE: online_toast(e.text, 2); break;
-            case NET_EV_STATE:
-                online_toast(net_state() == NET_ONLINE ? "Connected" : net_state() == NET_CONNECTING ? "Connecting..." : "Disconnected", 0);
+            case NET_EV_STATE:   // a reason (full, banned, wrong password, lost...) replaces the bare state
+                if (e.text[0]) online_toast(e.text, 2);
+                else online_toast(net_state() == NET_ONLINE ? "Connected" : net_state() == NET_CONNECTING ? "Connecting..." : "Disconnected", 0);
                 break;
             }
         }
@@ -593,9 +594,10 @@ static void report_local() {
 
 static void connect_now() {
     NetConfig c = {};
-    const char *nm = cfg_get("TOTK_NET_NAME"), *ad = cfg_get("TOTK_NET_ADDRESS");
+    const char *nm = cfg_get("TOTK_NET_NAME"), *ad = cfg_get("TOTK_NET_ADDRESS"), *pw = cfg_get("TOTK_NET_PASSWORD");
     snprintf(c.name, sizeof c.name, "%s", nm && *nm ? nm : "Player");
     snprintf(c.address, sizeof c.address, "%s", ad ? ad : "");
+    snprintf(c.token, sizeof c.token, "%s", pw ? pw : "");
     net_connect(&c);
 }
 

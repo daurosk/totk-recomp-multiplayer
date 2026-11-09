@@ -8,13 +8,20 @@ bodies.
 | File | What |
 |---|---|
 | `runtime/net/net_client.h` | The whole contract with the network side: players, teams, chat, teleport requests, host actions, events. |
-| `runtime/net/net_stub.c` | An offline implementation. Without `TOTK_NET_FAKE=1` nothing is online and the UI stays hidden. |
+| `runtime/net/net_client.c` | The client: the header over the wire (`online/proto/`, [online-wire.md](online-wire.md)) on a network thread of its own. With no server address set nothing is online and the UI stays hidden. |
+| `runtime/net/net_stub.c` | The offline fake behind `TOTK_NET_FAKE=1` (`runtime/net/net_fake.h`): `net_client.c` hands every call to it. |
 | `runtime/ui/online_ui.cpp` | Hotkeys, events, toasts, confirmation dialog, chat box, player list. |
 | `runtime/ui/online_wheel.cpp` | The wheel menu and its add-on slices. |
 | `runtime/ui/online_tab.cpp` | The Online tab of the F1 menu. |
 | `runtime/teleport.c` | Moves the local player. |
 
-The real client implements the same functions as `net_stub.c` and replaces it in the build.
+The client keeps the player's online key in `<profile>/online/identity.key` (made on the first connection; it is the
+account, so keep it) and the key of every server it joined in `<profile>/online/servers.txt`: a server that shows up
+on a known address with another key is refused, with a message naming that file. `net_password` (the Online tab's
+Password row) is the room's password or a one-time claim code, needed only on the first visit. A lost connection is
+retried for as long as the server holds the session (`hold_seconds`, 30 by default); a refusal or a kick is final and
+its reason shows in the Online tab and as a toast. `tests/net_client_check.py` runs the client against the real server
+and the bots.
 
 ## Trying it without a server
 
