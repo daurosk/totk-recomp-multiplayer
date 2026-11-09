@@ -94,7 +94,7 @@ Main 1.2.1, read with capstone on the decompressed NSO (`recomp/nso.py`; the ext
 - Camera export, commit 29fe902: `runtime/vk_camera.c` (`vk_camera_draw` beside `vk_dlaa_draw` in
   `runtime/vk_exec_draw.c`, `vk_camera_viewproj` for any thread, seqlock). Name tags: `online_tags_layout` in
   `runtime/ui/online_ui.cpp` (background draw list, fade 40 to 120 m, hidden at clip w <= 0.3, stale camera 250 ms,
-  `TOTK_PUPPET_TAG_FLIPY`). A log line every 5 s, `puppets: tags: camera ... [name w .. ndc .. ..]`, gives each
+  no y flip knob any more). A log line every 5 s, `puppets: tags: camera ... [name w .. ndc .. ..]`, gives each
   puppet's projection.
 - Delay spikes, commit 0fdb7a4: `tools/net_bot.c` `walk ... [SPIKE_MS]`; `tests/net_client_check.py` checks a 150 ms
   spike every 1.5 to 3 s: p95 0.185 m, delay 99 ms. Client check 0 failures; server check 0 failures.
@@ -110,11 +110,47 @@ Main 1.2.1, read with capstone on the decompressed NSO (`recomp/nso.py`; the ext
   `tools/build_game.py --gen C:/Users/Caleb/Desktop/totk-recomp-multiplayer-ui/generated/v121 --romfs
   C:/Users/Caleb/Desktop/P13/project/build/extracted/v121/romfs` (about 12 s, runtime only).
 
+## Done (fourth session, same branch)
+
+- Merged origin/main (owner-server PR #8, updater) at 374baf5: `SV_FEATURES_GRANTED` is now puppets | actors,
+  `player_drop` and the area case call both `sv_puppets_*` and `sva_*`, `tools/build_server.py` builds
+  `sv_puppets.c`, `sv_actors.c` and `sv_owner.c`. Server check, client check, actor server check, actor lab and
+  proto check: 0 failures.
+- Tag projection, commit 553ee18: **the camera was right all along.** `TOTK_CAMERA_DUMP=1` (`runtime/vk_camera.c`
+  `camera_dump`, and a player line in `runtime/puppet_self.c`) logs every 0x940 block at c4 for 50 ms every 5 s. The
+  scene camera is a pair of double-buffered blocks drawn with the 1600x900 D32 depth (format 126); the shadow and
+  other cameras use 800x800 / 800x450 D16 or 64x64 targets and are already filtered out. Layout (vec4 rows): 0-2
+  view (3x4), 3-6 view-projection, 7-10 projection, 11-13 inverse view (camera position in column 3, 5 m behind the
+  player), 14-15 misc (far 25000, aspect 1.7778). Replaying the logged tag numbers through the dumped matrix gave the
+  same NDC values: the invented players simply stood outside the view. Two fixes: the screen y is now
+  `(0.5 - ny/2) * h` (clip y grows with world height; `TOTK_PUPPET_TAG_FLIPY` is gone), and the fake's first invented
+  player (id 2, Alice) walks 8 m in front of the local player along its facing (`net_stub.c` `AHEAD_M`, `g_fwd` from
+  `net_set_self`). Demo shot `build/v121/demo-tag/02-chat-idle.png`: the "Alice" tag is on screen, above the horizon.
+- Body, static probe of `requestCreateActorSync` main+0x12a8b44 (1.2.1; address from the actors worker's notes,
+  `side-session-notes/.../r1-actors-handover.md`). Seven register arguments, so `rt_call` can call it:
+  x0 manager (`ActorInstanceMgr::sInstance` main+0x4722920 holds it; byte +0xe1 bit 1 refuses), x1 pointer to a
+  struct whose first word is the actor name's `char *` (it builds `Actor/<name>` + suffix on its stack), x2 the
+  CreateArg (nullable; with NULL it takes defaults at 0x12a9284; fields read: u8 +0x48, +0x4b, +0x4c, +0x4d, +0x50,
+  u16 +0x51, u8 +0x53, pointers +0x68, +0x70, +0x78, +0x80, +0x88; the transform is presumably in +0x0..+0x47, not
+  checked), x3 must be 0 (non-zero takes another path at 0x12a91b8), x4 nullable (defaults to [resource+0x18]),
+  x5 stored beside the arg, x6 an int * for a result code (written 8 on failure, nullable). Returns the actor (the
+  result of a virtual cast at 0x12a9164) or NULL. It loads the pack synchronously (main+0xabab98), so call it from the
+  game thread only.
+- Not done: the body itself, local animation, map markers, the two-game round, the PR.
+
 ## Plan for the next session
 
-1. Fix the tag projection (above), then check a tag on screen in a demo shot.
-2. Body: find the sync create and its arg, spawn the stock `Player` model under a puppet actor (pack built from the
-   user's RomFS into `build/`, control and camera components left out), drive it kinematically from `net_puppets`.
-3. Local animation for `NetSelf.anim` (probe the actor's animation state), glide and ride.
-4. Map markers (probe the map screen), then the two-game round with a server (slots 0 and 1, `game.lock`), and the PR
-   against main with tested and not-tested lists.
+1. Game-thread calls: the actors worker's frame hook (`actors_frame` patch set, site main+0xb36948, branch
+   `origin/actors`, `runtime/net_actors_game.c`, saves and restores the whole Cpu around game calls) is the place to
+   call `requestCreateActorSync`, `updateTrans` main+0xe8daf0, `updateRotation` main+0xe655d8 and `requestDelete`
+   main+0x83aa68 from. It is not on main yet: ask the coordinator whether to wait for the actors PR or to merge
+   `origin/actors` into this branch, rather than adding a second hook at the same site.
+2. Body: first spawn a stock actor by name with a NULL CreateArg (any small NPC) from that hook, log the returned
+   pointer, move it with updateTrans to a puppet's position every frame. Then the puppet pack (the stock `Player`
+   model without control and camera components, built from the user's RomFS into `build/` the way
+   `runtime/camera_speed.c` `cam_pack_build` edits a pack).
+3. Local animation for `NetSelf.anim`, glide and ride; map markers; the two-game round (slots 0 and 1, `game.lock`);
+   the PR against main with tested and not-tested lists.
+
+Probe helper (outside the repo): a 10-line capstone script over `recomp/nso.py` `Nso(...).image`, run with the P13
+venv; the main NSO is `C:/Users/Caleb/Desktop/totk-recomp-multiplayer-net/build/extracted/v121/exefs/main`.
