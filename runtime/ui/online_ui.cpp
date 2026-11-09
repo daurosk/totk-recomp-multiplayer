@@ -231,12 +231,13 @@ LookStyle::~LookStyle() {
     ImGui::PopFont();
 }
 
-// ---- toasts: notice rows on the left, as the game shows its own pickup notices; a coloured square marks the kind
-// (blue-grey info, green good, amber warning). A request (teleport, team invite) has a second row with the two answers.
+// ---- toasts: notice rows on the left in the chat's own style (thin dark bars, the game's HUD font); a small coloured
+// square marks the kind (blue-grey info, green good, amber warning). A request (teleport, team invite) gets a second thin
+// row with the two answers.
 void online_toasts_layout(float w, float h, float scale) {
     (void)w;
     double now = now_s();
-    float x = 10 * scale, y = h * 0.34f, fs = 24 * scale, row_h = 42 * scale;
+    float x = 10 * scale, y = h * 0.30f, fs = 22.8f * scale, row_h = 43 * scale, bar_h = 28 * scale;
     const ImU32 tint[3] = {IM_COL32(140, 168, 208, 255), IM_COL32(125, 208, 140, 255), IM_COL32(244, 190, 92, 255)};
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     ImFont *font = look_font();
@@ -247,7 +248,6 @@ void online_toasts_layout(float w, float h, float scale) {
         if (a <= 0) continue;
         look_alpha(a);
         bool ask = t.what != 0;
-        // wrap to at most two rows of 640 px
         float maxw = 640 * scale;
         const char *s = t.text, *end = t.text + strlen(t.text);
         std::vector<std::pair<const char *, const char *>> rows;
@@ -258,53 +258,47 @@ void online_toasts_layout(float w, float h, float scale) {
             s = brk;
             while (s < end && *s == ' ') s++;
         }
-        float tw = 0;
-        for (auto &r : rows) tw = fmaxf(tw, look_width(fs, r.first, r.second));
-        float bh = (float)rows.size() * row_h + (ask ? row_h + 8 * scale : 0), bw = tw + 40 * scale + 72 * scale;
-        if (ask) bw = fmaxf(bw, 470 * scale);
-        look_bar(dl, ImVec2(x, y), ImVec2(x + bw, y + bh - 3 * scale), 125, 64 * scale);
-        look_square(dl, ImVec2(x + 8 * scale, y + 8 * scale), 26 * scale, tint[t.kind % 3]);
-        float ty = y + 5 * scale;
         for (auto &r : rows) {
-            look_text(dl, fs, ImVec2(x + 40 * scale, ty), LOOK_TEXT, r.first, r.second);
-            ty += row_h;
+            float tw = look_width(fs, r.first, r.second);
+            look_bar(dl, ImVec2(x, y + 8 * scale), ImVec2(x + 40 * scale + tw + 14 * scale, y + 8 * scale + bar_h), 124);
+            if (&r == &rows[0]) look_square(dl, ImVec2(x + 14 * scale, y + 12 * scale), 20 * scale, tint[t.kind % 3]);
+            look_text(dl, fs, ImVec2(x + 40 * scale, y + 9 * scale), LOOK_TEXT, r.first, r.second);
+            y += row_h;
         }
         if (ask) {
-            float by = y + (float)rows.size() * row_h + 2 * scale;
-            dl->AddRectFilled(ImVec2(x + 40 * scale, by + row_h - 6 * scale), ImVec2(x + 40 * scale + (bw - 80 * scale) * (float)(left / t.ttl), by + row_h - 3 * scale),
-                              fade(LOOK_GOLD));
             char yes[48], no[48];
             snprintf(yes, sizeof yes, "%s  Accept", online_key_name(k_yes.load()));
             snprintf(no, sizeof no, "%s  Refuse", online_key_name(k_no.load()));
-            float bx = x + 40 * scale;
+            const char *lab[2] = {yes, no};
+            float yw = look_width(fs, lab[0]) + 26 * scale, nw = look_width(fs, lab[1]) + 26 * scale;
+            look_bar(dl, ImVec2(x, y + 8 * scale), ImVec2(x + 40 * scale + yw + nw + 26 * scale, y + 8 * scale + bar_h), 124);
+            dl->AddRectFilled(ImVec2(x, y + 8 * scale + bar_h), ImVec2(x + (40 * scale + yw + nw + 26 * scale) * (float)(left / t.ttl), y + 10 * scale + bar_h), fade(LOOK_GOLD));
             char id[24];
             snprintf(id, sizeof id, "##toast%zu", i);
-            ImGui::SetNextWindowPos(ImVec2(bx, by));
-            ImGui::SetNextWindowSize(ImVec2(bw - 40 * scale, row_h - 8 * scale));
+            ImGui::SetNextWindowPos(ImVec2(x, y + 8 * scale));
+            ImGui::SetNextWindowSize(ImVec2(40 * scale + yw + nw + 26 * scale, bar_h));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
             ImGui::Begin(id, nullptr,
                          ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
                              ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
-            const char *lab[2] = {yes, no};
-            float bx2 = bx;
+            float bx = x + 40 * scale;
             for (int k = 0; k < 2; k++) {
-                float lw = look_width(fs * 0.85f, lab[k]) + 26 * scale;
-                ImGui::SetCursorScreenPos(ImVec2(bx2, by));
+                float lw = k ? nw : yw;
+                ImGui::SetCursorScreenPos(ImVec2(bx, y + 8 * scale));
                 ImGui::PushID(k);
-                bool hit = ImGui::InvisibleButton("##ans", ImVec2(lw, row_h - 10 * scale));
+                bool hit = ImGui::InvisibleButton("##ans", ImVec2(lw, bar_h));
                 ImGui::PopID();
-                bool hov = ImGui::IsItemHovered();
-                ImVec2 p0 = ImGui::GetItemRectMin();
-                dl->AddRectFilled(p0, ImVec2(p0.x + lw, p0.y + row_h - 10 * scale), fade(hov ? IM_COL32(240, 228, 170, 90) : IM_COL32(255, 255, 255, 28)));
-                look_text(dl, fs * 0.85f, ImVec2(p0.x + 13 * scale, p0.y + 3 * scale), k ? LOOK_DIM : LOOK_GOLD, lab[k]);
+                if (ImGui::IsItemHovered()) dl->AddRectFilled(ImVec2(bx, y + 8 * scale), ImVec2(bx + lw, y + 8 * scale + bar_h), fade(IM_COL32(240, 228, 170, 70)));
+                look_text(dl, fs, ImVec2(bx + 10 * scale, y + 9 * scale), k ? LOOK_DIM : LOOK_GOLD, lab[k]);
                 if (hit) (k ? g_req_no : g_req_yes) = 1;
-                bx2 += lw + 12 * scale;
+                bx += lw + 8 * scale;
             }
             ImGui::End();
             ImGui::PopStyleVar(2);
+            y += row_h;
         }
-        y += bh + 4 * scale;
+        y += 6 * scale;
     }
     look_alpha(1);
 }
@@ -335,6 +329,7 @@ void online_confirm_layout(float w, float h, float scale) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22 * scale, 18 * scale));
     ImGui::Begin("##online_confirm", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
+    ImGui::SetWindowFontScale(22.8f / 26.0f);
     ImGui::TextWrapped("%s", g_conf.q);
     ImGui::Spacing();
     float bw = (pw - 44 * scale - ImGui::GetStyle().ItemSpacing.x) / 2;
@@ -514,7 +509,7 @@ void online_chat_layout(float w, float h, float scale) {
     const char *cl = cfg_get("TOTK_NET_CHAT_LINES");
     if (cl && atoi(cl) >= 4 && atoi(cl) <= 30) lines = atoi(cl);
     look_alpha(alpha);
-    float fs = 24 * scale, row_h = 42 * scale, x0 = 10 * scale, tx = 40 * scale;
+    float fs = 22.8f * scale, row_h = 43 * scale, bar_h = 28 * scale, x0 = 10 * scale, tx = 40 * scale;
     float cw = fminf(w * 0.44f, 820 * scale);
 
     // wrap every kept line into rows of at most cw
@@ -548,21 +543,21 @@ void online_chat_layout(float w, float h, float scale) {
     if (g_chat.typing) g_chat.scroll = std::max(0, std::min(g_chat.scroll + (int)ImGui::GetIO().MouseWheel, std::max(0, total - lines)));
     int last = total - g_chat.scroll, first_row = std::max(0, last - lines);
     float input_h = g_chat.typing ? 74 * scale : 0;
-    float bottom = h - 86 * scale - input_h;
+    float bottom = h - 91 * scale - input_h;
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     float y = bottom - (float)(last - first_row) * row_h;
     for (int i = first_row; i < last; i++, y += row_h) {
         const ChatRow &r = rows[(size_t)i];
         float tw = look_width(fs, r.text.c_str());
-        look_bar(dl, ImVec2(x0, y), ImVec2(x0 + tx + tw + 64 * scale, y + row_h - 3 * scale), 120, 64 * scale);
+        look_bar(dl, ImVec2(x0, y + 8 * scale), ImVec2(x0 + tx + tw + 14 * scale, y + 8 * scale + bar_h), 124);
         ImU32 tag = chat_color(r.channel);
         const char *s = r.text.c_str();
         float px = x0 + tx;
         if (r.prefix) {
-            look_text(dl, fs, ImVec2(px, y + 5 * scale), tag, s, s + r.prefix);
+            look_text(dl, fs, ImVec2(px, y + 9 * scale), tag, s, s + r.prefix);
             px += look_width(fs, s, s + r.prefix);
         }
-        look_text(dl, fs, ImVec2(px, y + 5 * scale), r.channel == NET_CHAT_ALL ? LOOK_TEXT : tag, s + r.prefix);
+        look_text(dl, fs, ImVec2(px, y + 9 * scale), r.channel == NET_CHAT_ALL ? LOOK_TEXT : tag, s + r.prefix);
     }
     if (g_chat.typing) {
         float iy = bottom + 6 * scale;
@@ -572,19 +567,19 @@ void online_chat_layout(float w, float h, float scale) {
         snprintf(label, sizeof label, "%s", chname);
         ImU32 c = chat_color(g_chat.server_msg ? NET_CHAT_SYSTEM : g_chat.channel);
         float lw = look_width(fs, label) + 40 * scale;
-        look_bar(dl, ImVec2(x0, iy), ImVec2(x0 + cw, iy + row_h), 175);
-        look_square(dl, ImVec2(x0 + 8 * scale, iy + 8 * scale), 26 * scale, c);
-        look_text(dl, fs, ImVec2(x0 + tx + 4 * scale, iy + 5 * scale), c, label);
+        look_bar(dl, ImVec2(x0, iy + 8 * scale), ImVec2(x0 + cw, iy + 8 * scale + bar_h), 150);
+        look_square(dl, ImVec2(x0 + 14 * scale, iy + 12 * scale), 20 * scale, c);
+        look_text(dl, fs, ImVec2(x0 + tx + 4 * scale, iy + 9 * scale), c, label);
         const char *hint = "Enter sends, Tab changes channel, Esc closes. /w name message whispers.";
-        look_bar(dl, ImVec2(x0, iy + row_h + 3 * scale), ImVec2(x0 + 18 * scale + look_width(16 * scale, hint) + 40 * scale, iy + row_h + 3 * scale + 28 * scale), 100, 40 * scale);
-        look_text(dl, 16 * scale, ImVec2(x0 + 14 * scale, iy + row_h + 7 * scale), LOOK_DIM, hint);
+        look_bar(dl, ImVec2(x0, iy + row_h + 3 * scale), ImVec2(x0 + 18 * scale + look_width(16 * scale, hint) + 14 * scale, iy + row_h + 3 * scale + 24 * scale), 100);
+        look_text(dl, 16 * scale, ImVec2(x0 + 14 * scale, iy + row_h + 4 * scale), LOOK_DIM, hint);
         // the text field: a transparent ImGui field over the bar, in the game's font and colours
-        ImGui::SetNextWindowPos(ImVec2(x0 + tx + lw, iy));
-        ImGui::SetNextWindowSize(ImVec2(cw - tx - lw, row_h));
+        ImGui::SetNextWindowPos(ImVec2(x0 + tx + lw, iy + 8 * scale));
+        ImGui::SetNextWindowSize(ImVec2(cw - tx - lw, bar_h));
         ImGui::SetNextWindowFocus();
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4 * scale, 7 * scale));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4 * scale, 1 * scale));
         ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(LOOK_TEXT));
         ImGui::PushFont(font);
@@ -608,9 +603,10 @@ void online_chat_layout(float w, float h, float scale) {
     look_alpha(1);
 }
 
-// ---- player list: the game's HUD rows at the top right, one per player (a coloured square for the team, the name, the
-// role and ping on the right, the character and place small underneath), under a small "Players online" line.
-static bool g_list_on;
+// ---- player list: the HUD rows at the top right, as the game draws party members: a coloured square, the name, the
+// hearts under it, how far away they are and an arrow toward them on the right. The row of the local player is the one
+// with a dark bar behind it.
+static bool g_list_on = true;
 void online_list_toggle(void) { g_list_on = !g_list_on; }
 
 bool online_player_color(const NetPlayer &p, ImU32 *col) {
@@ -621,49 +617,148 @@ bool online_player_color(const NetPlayer &p, ImU32 *col) {
 static ImU32 team_color(uint32_t team) {
     static const ImU32 pal[] = {IM_COL32(140, 165, 205, 255), IM_COL32(125, 205, 140, 255), IM_COL32(240, 185, 90, 255),
                                 IM_COL32(215, 140, 200, 255), IM_COL32(120, 210, 210, 255), IM_COL32(230, 120, 110, 255)};
-    return team ? pal[(team - 1) % (sizeof pal / sizeof *pal)] : IM_COL32(170, 178, 190, 255);
+    return team ? pal[(team - 1) % (sizeof pal / sizeof *pal)] : IM_COL32(150, 172, 205, 255);
+}
+
+// The direction the local player last moved in, as a compass angle (0 north, clockwise, radians); the camera sits behind
+// the player, so this is the best guess of where the screen looks.
+static float g_heading;
+static void heading_update() {
+    static float prev[3];
+    static bool have;
+    float p[3];
+    if (!teleport_player_pos(p)) {
+        have = false;
+        return;
+    }
+    if (have) {
+        float dx = p[0] - prev[0], dz = p[2] - prev[2];
+        if (dx * dx + dz * dz > 0.04f) g_heading = atan2f(dx, -dz);
+    }
+    memcpy(prev, p, sizeof prev), have = true;
+}
+
+static float bearing_to(const NetPlayer &p, float *dist) {
+    float me[3] = {0, 0, 0};
+    teleport_player_pos(me);
+    float dx = p.pos[0] - me[0], dz = p.pos[2] - me[2];
+    *dist = sqrtf(dx * dx + dz * dz);
+    float rel = atan2f(dx, -dz) - g_heading;
+    while (rel > 3.14159265f) rel -= 6.2831853f;
+    while (rel < -3.14159265f) rel += 6.2831853f;
+    return rel;
+}
+
+static void format_away(float d, char *out, size_t n, bool away) {
+    if (d >= 1000) snprintf(out, n, "%s%.2f km", away ? "Away " : "", d / 1000);
+    else snprintf(out, n, "%s%d m", away ? "Away " : "", (int)d);
+}
+
+// A heart filled to `fill` (0..1) from the left, w px wide.
+static void heart(ImDrawList *dl, ImVec2 a, float w, float fill) {
+    float r = w * 0.27f;
+    ImVec2 c1(a.x + w * 0.27f, a.y + w * 0.30f), c2(a.x + w * 0.73f, a.y + w * 0.30f), tip(a.x + w * 0.5f, a.y + w * 0.96f);
+    ImU32 dark = fade(IM_COL32(74, 40, 30, 255)), red = fade(IM_COL32(238, 84, 44, 255));
+    for (int pass = 0; pass < 2; pass++) {
+        ImU32 col = pass ? red : dark;
+        if (pass && fill <= 0) break;
+        float clip = pass ? a.x + w * fill : a.x + w + 1;
+        dl->PushClipRect(ImVec2(a.x - 1, a.y - 1), ImVec2(clip, a.y + w + 1), true);
+        dl->AddCircleFilled(c1, r, col, 14);
+        dl->AddCircleFilled(c2, r, col, 14);
+        dl->AddTriangleFilled(ImVec2(a.x + w * 0.02f, a.y + w * 0.38f), ImVec2(a.x + w * 0.98f, a.y + w * 0.38f), tip, col);
+        dl->PopClipRect();
+    }
+}
+
+static void hearts_row(ImDrawList *dl, ImVec2 a, float w, float step, const NetPlayer &p) {
+    if (!p.hearts_max_q) return;
+    int n = (p.hearts_max_q + 3) / 4;
+    for (int i = 0; i < n; i++) {
+        int q = (int)p.hearts_q - i * 4;
+        heart(dl, ImVec2(a.x + (float)i * step, a.y), w, q >= 4 ? 1.0f : q <= 0 ? 0.0f : (float)q / 4.0f);
+    }
+}
+
+// An arrow toward a player, `rel` radians clockwise from straight ahead, in the game's cyan.
+static void arrow(ImDrawList *dl, ImVec2 c, float size, float rel) {
+    const ImVec2 pts[4] = {ImVec2(0, -1), ImVec2(0.72f, 0.85f), ImVec2(0, 0.4f), ImVec2(-0.72f, 0.85f)};
+    ImVec2 q[4];
+    for (int i = 0; i < 4; i++)
+        q[i] = ImVec2(c.x + (pts[i].x * cosf(rel) - pts[i].y * sinf(rel)) * size, c.y + (pts[i].x * sinf(rel) + pts[i].y * cosf(rel)) * size);
+    dl->AddConvexPolyFilled(q, 4, fade(IM_COL32(112, 214, 226, 255)));
+    dl->AddPolyline(q, 4, fade(IM_COL32(40, 110, 130, 200)), ImDrawFlags_Closed, 1.0f);
 }
 
 void online_list_layout(float w, float h, float scale) {
     (void)h;
     if (!g_list_on || net_state() != NET_ONLINE) return;
     NetPlayer pl[NET_MAX_PLAYERS];
-    NetTeam teams[NET_MAX_TEAMS];
-    int n = net_players(pl, NET_MAX_PLAYERS), nt = net_teams(teams, NET_MAX_TEAMS);
+    int n = net_players(pl, NET_MAX_PLAYERS);
     ImDrawList *dl = ImGui::GetForegroundDrawList();
-    float row_h = 58 * scale, big = 25 * scale, small = 17 * scale, rw = 430 * scale, x = w - 14 * scale - rw, y = 78 * scale;
-    char head[48];
-    snprintf(head, sizeof head, "Players online  %d", n);
-    look_bar(dl, ImVec2(x, y), ImVec2(x + rw, y + 34 * scale), 130);
-    look_text(dl, small * 1.1f, ImVec2(x + 12 * scale, y + 6 * scale), LOOK_GOLD, head);
-    char hint[40];
-    snprintf(hint, sizeof hint, "%s: close", online_key_name(k_list.load()));
-    look_text(dl, small * 0.9f, ImVec2(x + rw - 10 * scale - look_width(small * 0.9f, hint), y + 9 * scale), LOOK_DIM, hint);
-    y += 38 * scale;
+    float fs = 22.0f * scale, small = 17.0f * scale, rw = 335 * scale, x0 = w - 340 * scale, y = 44 * scale;
+    for (int pass = 0; pass < 2; pass++)   // the others first, the local player's row last
+        for (int i = 0; i < n; i++) {
+            const NetPlayer &p = pl[i];
+            bool self = p.id == net_self_id();
+            if (self != (pass == 1)) continue;
+            ImU32 col;
+            online_player_color(p, &col);
+            if (self) {
+                look_bar(dl, ImVec2(x0, y), ImVec2(x0 + rw, y + 28 * scale), 124);
+                look_square(dl, ImVec2(x0 + 1 * scale, y + 1 * scale), 26 * scale, team_color(p.team));
+                look_text(dl, fs, ImVec2(x0 + 36 * scale, y + 3 * scale), col, p.name);
+                y += 53 * scale;
+                continue;
+            }
+            look_square(dl, ImVec2(x0 + 1 * scale, y), 26 * scale, team_color(p.team));
+            look_text(dl, fs, ImVec2(x0 + 36 * scale, y + 1 * scale), col, p.name);
+            hearts_row(dl, ImVec2(x0 + 36 * scale, y + 27 * scale), 13 * scale, 13.2f * scale, p);
+            float d;
+            float rel = bearing_to(p, &d);
+            char away[32];
+            format_away(d, away, sizeof away, true);
+            look_text(dl, small, ImVec2(x0 + 276 * scale - look_width(small, away), y + 3 * scale), LOOK_DIM, away);
+            arrow(dl, ImVec2(x0 + 296 * scale, y + 9 * scale), 8.5f * scale, rel);
+            y += 53 * scale;
+        }
+}
+
+// Name tags in the world: a player in front of the camera gets their name and distance over their head with their hearts
+// under it; one outside the view gets the name, the distance and an arrow toward them near the bottom of the screen.
+// The camera is not readable from here, so its heading is guessed from the local player's last movement (heading_update)
+// and its view angle is a fixed 50 degrees up and down.
+void online_tags_layout(float w, float h, float scale) {
+    if (net_state() != NET_ONLINE) return;
+    heading_update();
+    float me[3];
+    if (!teleport_player_pos(me)) return;
+    NetPlayer pl[NET_MAX_PLAYERS];
+    int n = net_players(pl, NET_MAX_PLAYERS);
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    float small = 17.5f * scale, tan_v = tanf(25.0f * 3.14159265f / 180.0f), tan_h = tan_v * w / h;
     for (int i = 0; i < n; i++) {
         const NetPlayer &p = pl[i];
-        bool self = p.id == net_self_id();
-        look_bar(dl, ImVec2(x, y), ImVec2(x + rw, y + row_h - 4 * scale), self ? 150 : 105);
-        look_square(dl, ImVec2(x + 10 * scale, y + 9 * scale), 30 * scale, team_color(p.team));
-        ImU32 col;
-        online_player_color(p, &col);
-        char nm[NET_NAME_MAX + 8];
-        snprintf(nm, sizeof nm, "%s", p.name);
-        look_text(dl, big, ImVec2(x + 52 * scale, y + 3 * scale), col, nm);
-        const char *tn = nullptr;
-        for (int k = 0; k < nt; k++)
-            if (teams[k].id == p.team) tn = teams[k].name;
-        char sub[160];
-        snprintf(sub, sizeof sub, "%s  %s%s%s%s", p.character, p.area, tn ? "  Team " : "", tn ? tn : "", p.muted ? "  muted" : "");
-        look_text(dl, small, ImVec2(x + 52 * scale, y + 31 * scale), LOOK_DIM, sub);
-        char right[40] = "";
-        if (self) snprintf(right, sizeof right, "You");
-        else if (p.role == NET_ROLE_HOST) snprintf(right, sizeof right, "Host  %u ms", p.ping_ms);
-        else if (p.role == NET_ROLE_MOD) snprintf(right, sizeof right, "Mod  %u ms", p.ping_ms);
-        else snprintf(right, sizeof right, "%u ms", p.ping_ms);
-        ImU32 pc = self ? LOOK_DIM : p.ping_ms < 60 ? IM_COL32(170, 230, 160, 255) : p.ping_ms < 120 ? LOOK_GOLD : IM_COL32(240, 140, 110, 255);
-        look_text(dl, small * 1.05f, ImVec2(x + rw - 12 * scale - look_width(small * 1.05f, right), y + 8 * scale), pc, right);
-        y += row_h;
+        if (p.id == net_self_id()) continue;
+        float d, rel = bearing_to(p, &d);
+        char dist[24], line[NET_NAME_MAX + 32];
+        format_away(d, dist, sizeof dist, false);
+        snprintf(line, sizeof line, "%s  %s", p.name, dist);
+        float fwd = cosf(rel) * d;
+        if (fabsf(rel) < 1.0f && fwd > 1.0f && fabsf(tanf(rel)) < tan_h) {
+            float sx = w / 2 + tanf(rel) / tan_h * (w / 2);
+            float sy = h / 2 - ((p.pos[1] + 2.4f - (me[1] + 2.0f)) / fwd) / tan_v * (h / 2) - 0.08f * h;
+            float tw = look_width(small, line);
+            look_text(dl, small, ImVec2(sx - tw / 2, sy), LOOK_TEXT, line);
+            hearts_row(dl, ImVec2(sx - 4 * 11 * scale, sy + 22 * scale), 11 * scale, 10.5f * scale, p);
+        } else {
+            float sx = w / 2 + sinf(rel) * w * 0.28f, sy = h - 118 * scale;
+            float tw = look_width(small, line);
+            float nw = look_width(small, p.name) + look_width(small, "  ");
+            look_text(dl, small, ImVec2(sx - tw / 2, sy - 32 * scale), LOOK_DIM, p.name);
+            look_text(dl, small, ImVec2(sx - tw / 2 + nw, sy - 32 * scale), LOOK_TEXT, dist);
+            arrow(dl, ImVec2(sx, sy + 8 * scale), 15 * scale, rel);
+        }
     }
 }
 
@@ -779,6 +874,7 @@ void online_pump(uint64_t frame) {
 void online_layout(float w, float h, float scale, bool menu_open) {
     if (!net_enabled() || menu_open) return;
     online_chat_layout(w, h, scale);
+    online_tags_layout(w, h, scale);
     online_list_layout(w, h, scale);
     online_toasts_layout(w, h, scale);
     online_wheel_layout(w, h, scale);
@@ -822,9 +918,8 @@ const char *online_demo_shot(uint64_t frame) {
     case 2:
         net_chat_send(NET_CHAT_ALL, nullptr, g_chat.buf), chat_close();
         break;
-    case 3: online_list_toggle(); break;
+    case 3: break;   // the list is always on
     case 4:
-        online_list_toggle();   // closes the list
         online_toast("Dax joined the server", 1);   // one of each kind, for the screenshot
         online_toast("Bao is far away: the teleport may take a while", 2);
         online_toast_ask("Alice asks to teleport to you", 1, 0);

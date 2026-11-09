@@ -461,7 +461,7 @@ void online_wheel_layout(float w, float h, float scale) {
     const float TAU = 6.2831853f, gap = 0.035f;
     float step = TAU / (float)n;
     ImFont *font = look_font();
-    float fs = 24 * scale;
+    float fs = 22.8f * scale;
     const ImU32 cream = IM_COL32(246, 241, 224, 255), gold = IM_COL32(255, 226, 140, 255);
     for (int i = 0; i < n; i++) {
         float mid = -TAU / 4 + step * (float)i;   // up, clockwise

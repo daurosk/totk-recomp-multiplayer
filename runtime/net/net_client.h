@@ -33,6 +33,7 @@ typedef struct {
     NetRole role;
     uint32_t ping_ms;
     uint8_t muted;                  // the host muted them: their chat does not show
+    uint8_t hearts_q, hearts_max_q; // health in quarter hearts and the most they have; 0 max: not known (no heart row)
 } NetPlayer;
 
 typedef struct {

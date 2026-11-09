@@ -48,7 +48,7 @@ buttons together, let go), the wheel's size and the chat's fade time and line co
 ## Look
 
 Everything drawn over the game (chat, player list, toasts, the wheel, the confirmation) looks like the game's own HUD, not
-like the F1 menu: the Switch standard shared font, cream text with a one-pixel dark shadow, sharp-cornered translucent
+like the F1 menu: the game's own HUD font (DFT_B9, read from the RomFS at run time), cream text with a one-pixel dark shadow, sharp-cornered translucent
 dark bars that fade out on the right, and a small coloured square marking a person (team colour) or a kind of notice.
 The F1 menu's Online tab keeps the menu's style. The font is read at run time from `shared-fonts/0-standard.bfttf`
 (`ov_shared_font_dir`: `TOTK_SHARED_FONTS`, `shared-fonts` next to `totk.exe`, or the extracted firmware folder that

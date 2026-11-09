@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zstd.h>
 
 #include "imgui.h"
 #include "imgui_internal.h"   // SetFocusID, NavCursorVisible
@@ -338,6 +339,98 @@ static void add_row_glyphs(void *ctx, const char *text) {
     static_cast<ImFontGlyphRangesBuilder *>(ctx)->AddText(text);
 }
 
+// ---- the game's own HUD face, read from the player's RomFS at run time. The text of the game's HUD notices is DFHei
+// Bold B9 ("DFT_B9.bfttf"), a narrow, evenly spaced face; the only archive that holds it is Font/Font_TWzh.Nin_NX_NVN
+// .bfarc.zs, a SARC archive compressed with zs.zsdic, one of the dictionaries in Pack/ZsDic.pack.zs. The font inside is a
+// BFTTF image (ov_system.c): its words after the 8-byte header are XORed with a key taken from the first word.
+static int u32_at(const uint8_t *p, size_t n, size_t off, uint32_t *v) {
+    if (off > n || n - off < 4) return 0;
+    memcpy(v, p + off, 4);
+    return 1;
+}
+
+// SARC member `name` (little endian) of p[0..n): its start and size; 0 when it is not there.
+static int sarc_find(const uint8_t *p, size_t n, const char *name, size_t *at, size_t *size) {
+    uint32_t data;
+    uint16_t head, count;
+    if (n < 0x20 || memcmp(p, "SARC", 4) || p[6] != 0xff || p[7] != 0xfe || !u32_at(p, n, 12, &data)) return 0;
+    memcpy(&head, p + 4, 2);
+    if (head + 12u > n || memcmp(p + head, "SFAT", 4)) return 0;
+    memcpy(&count, p + head + 6, 2);
+    size_t names = head + 12 + (size_t)count * 16;
+    if (names + 8 > n || memcmp(p + names, "SFNT", 4)) return 0;
+    names += 8;
+    for (unsigned i = 0; i < count; i++) {
+        uint32_t attr, lo, hi;
+        size_t e = head + 12 + (size_t)i * 16, len = strlen(name);
+        if (!u32_at(p, n, e + 4, &attr) || !u32_at(p, n, e + 8, &lo) || !u32_at(p, n, e + 12, &hi)) return 0;
+        size_t s = names + (size_t)(attr & 0xffffff) * 4;
+        if (s + len + 1 > n || memcmp(p + s, name, len + 1)) continue;
+        if (lo > hi || data + (size_t)hi > n) return 0;
+        *at = data + lo, *size = hi - lo;
+        return 1;
+    }
+    return 0;
+}
+
+// The whole RomFS file `path` (a row of the index, read from the image), malloc'd; null when it is not there.
+static uint8_t *romfs_slurp(const char *path, uint64_t *n) {
+    for (uint64_t i = 0, cnt = romfs_file_count(); i < cnt; i++) {
+        uint64_t off, size;
+        const char *e = romfs_entry(i, &off, &size);
+        if (!e || strcmp(e, path) || !size || size > (256u << 20)) continue;
+        FILE *f = fopen(romfs_image_path(), "rb");
+        uint8_t *p = f ? (uint8_t *)malloc((size_t)size) : nullptr;
+        if (p) {
+            plat_fseek64(f, (int64_t)off, SEEK_SET);
+            if (fread(p, 1, (size_t)size, f) != (size_t)size) free(p), p = nullptr;
+        }
+        if (f) fclose(f);
+        *n = size;
+        return p;
+    }
+    return nullptr;
+}
+
+// Decompress a .zs file: dictionary id of its frame, found among the archive dictionaries `dics` (a SARC); malloc'd.
+static uint8_t *zs_unpack(const uint8_t *in, size_t n, const uint8_t *dics, size_t dics_n, size_t *out_n) {
+    unsigned long long rn = ZSTD_getFrameContentSize(in, n);
+    if (rn == ZSTD_CONTENTSIZE_UNKNOWN || rn == ZSTD_CONTENTSIZE_ERROR || rn > (256u << 20)) return nullptr;
+    uint8_t *out = (uint8_t *)malloc((size_t)rn);
+    ZSTD_DCtx *dctx = ZSTD_createDCtx();
+    size_t got = 0;
+    if (out && dctx) {
+        size_t at, size;
+        ZSTD_DDict *dd = dics && sarc_find(dics, dics_n, "zs.zsdic", &at, &size) ? ZSTD_createDDict(dics + at, size) : nullptr;
+        if (dics && (!dd || ZSTD_getDictID_fromFrame(in, n) != ZSTD_getDictID_fromDDict(dd))) got = (size_t)-1;
+        else got = dd ? ZSTD_decompress_usingDDict(dctx, out, (size_t)rn, in, n, dd) : ZSTD_decompress(out, (size_t)rn, in, n);
+        if (dd) ZSTD_freeDDict(dd);
+    }
+    if (dctx) ZSTD_freeDCtx(dctx);
+    if (!out || ZSTD_isError(got) || got != rn) return free(out), nullptr;
+    *out_n = (size_t)rn;
+    return out;
+}
+
+// DFT_B9 as a plain TrueType font in a malloc'd buffer (size in *n); null when the RomFS has none.
+static uint8_t *hud_font_load(uint64_t *n) {
+    uint64_t dn = 0, an = 0;
+    uint8_t *dz = romfs_slurp("Pack/ZsDic.pack.zs", &dn), *az = romfs_slurp("Font/Font_TWzh.Nin_NX_NVN.bfarc.zs", &an);
+    uint8_t *dics = nullptr, *arc = nullptr, *font = nullptr;
+    size_t dics_n = 0, arc_n = 0, at, size;
+    if (dz && az && (dics = zs_unpack(dz, (size_t)dn, nullptr, 0, &dics_n)) &&
+        (arc = zs_unpack(az, (size_t)an, dics, dics_n, &arc_n)) && sarc_find(arc, arc_n, "scft/DFT_B9.bfttf", &at, &size) &&
+        size > 100) {
+        uint32_t key = be32(arc + at) ^ 0x7f9a0218u;
+        if ((font = (uint8_t *)malloc(size - 8))) {
+            for (size_t i = 0; i < size - 8; i++) font[i] = arc[at + 8 + i] ^ (uint8_t)(key >> (24 - 8 * (i & 3)));
+            *n = size - 8;
+        }
+    }
+    free(dz), free(az), free(dics), free(arc);
+    return font;
+}
+
 static ImFont *g_game_font;   // the online UI's face (see fonts_up); null when the player's files hold none
 ImFont *online_game_font() { return g_game_font; }
 
@@ -378,28 +471,42 @@ static int fonts_up(float scale) {
         mc.FontDataOwnedByAtlas = false;
         fa->AddFontFromMemoryTTF(data[i], (int)size, 26.0f * scale, &mc, ranges[i].Data);
     }
-    // The game's own face for what the online UI draws over the game: the Switch standard shared font, read from the
-    // player's firmware files (tools/extract_fonts.py) and decoded here; nothing of it is shipped. Added after the
-    // merge loop so it stays a font of its own. Without the file the online UI uses the menu font.
+    // The face of what the online UI draws over the game: the game's own HUD font from the player's RomFS (hud_font_load),
+    // else the Switch standard shared font from the player's firmware files (tools/extract_fonts.py), else the menu font.
+    // Decoded in memory, never stored or shipped. Added after the merge loop so it stays a font of its own.
     uint8_t *game_ttf = nullptr;
     g_game_font = nullptr;
     {
-        char dir[512], path[640];
-        uint64_t size = 0;
-        snprintf(path, sizeof path, "%s/0-standard.bfttf", ov_shared_font_dir(dir, sizeof dir));
-        uint8_t *raw = plat_file_read(path, &size);
-        uint64_t n = raw ? ov_bfttf_size(raw, size) : 0;
-        if (n) {
-            uint32_t key = be32(raw) ^ 0x7f9a0218u;   // BFTTF: big-endian words XORed with a key; the font starts at byte 8
-            game_ttf = raw;
-            for (uint64_t i = 0; i < n; i++) raw[8 + i] ^= (uint8_t)(key >> (24 - 8 * (i & 3)));
-            if (font_usable(game_ttf + 8, n)) {
-                ImFontConfig gc;
-                gc.FontDataOwnedByAtlas = false;
-                g_game_font = fa->AddFontFromMemoryTTF(game_ttf + 8, (int)n, 26.0f * scale, &gc, kRanges);
-            }
+        uint64_t n = 0;
+        uint8_t *hud = hud_font_load(&n);
+        if (hud && font_usable(hud, n)) {
+            ImFontConfig gc;
+            gc.FontDataOwnedByAtlas = false;
+            game_ttf = hud;
+            g_game_font = fa->AddFontFromMemoryTTF(hud, (int)n, 26.0f * scale, &gc, kRanges);
+        } else {
+            free(hud);
         }
-        if (!g_game_font) rt_log("menu: no game font at %s: the online UI uses the menu font", path);
+        if (g_game_font) {
+            rt_log("menu: online UI font: the game's HUD font (DFT_B9, %llu bytes)", (unsigned long long)n);
+        } else {
+            char dir[512], path[640];
+            uint64_t size = 0;
+            snprintf(path, sizeof path, "%s/0-standard.bfttf", ov_shared_font_dir(dir, sizeof dir));
+            uint8_t *raw = plat_file_read(path, &size);
+            uint64_t sn = raw ? ov_bfttf_size(raw, size) : 0;
+            if (sn) {
+                uint32_t key = be32(raw) ^ 0x7f9a0218u;   // BFTTF: big-endian words XORed with a key; the font starts at byte 8
+                game_ttf = raw;
+                for (uint64_t i = 0; i < sn; i++) raw[8 + i] ^= (uint8_t)(key >> (24 - 8 * (i & 3)));
+                if (font_usable(game_ttf + 8, sn)) {
+                    ImFontConfig gc;
+                    gc.FontDataOwnedByAtlas = false;
+                    g_game_font = fa->AddFontFromMemoryTTF(game_ttf + 8, (int)sn, 26.0f * scale, &gc, kRanges);
+                }
+            }
+            rt_log(g_game_font ? "menu: online UI font: the Switch shared font %s" : "menu: no HUD font in the RomFS and none at %s: the online UI uses the menu font", path);
+        }
     }
     vk_queue_lock();   // the upload submits on the queue and waits for it
     int ok = ImGui_ImplVulkan_CreateFontsTexture();

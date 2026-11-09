@@ -32,7 +32,7 @@ static char g_local_area[NET_AREA_MAX] = "Unknown", g_local_char[NET_NAME_MAX] =
 static char g_name[NET_NAME_MAX] = "You";
 // The invented players stand within a hundred metres of the local player, so a teleport to one lands on ground the
 // game has loaded.
-static const float g_off[][3] = {{0, 0, 0}, {40, 2, 10}, {-60, 0, 30}, {25, 0, -70}, {90, 0, 15}};
+static const float g_off[][3] = {{0, 0, 0}, {8, 2, -45}, {-60, 0, 30}, {1450, 30, 580}, {90, 0, 15}};
 
 static int fake_on(void) {
     if (g_fake < 0) {
@@ -71,6 +71,7 @@ static NetPlayer *add_player(uint32_t id, const char *name, const char *ch, cons
     copy(p->area, sizeof p->area, area);
     p->pos[0] = x, p->pos[1] = y, p->pos[2] = z;
     p->role = role, p->team = team, p->ping_ms = ping;
+    p->hearts_max_q = 32, p->hearts_q = (uint8_t)(6 + (id * 7) % 27);   // a scripted health for the pictures
     return p;
 }
 
@@ -216,7 +217,7 @@ void net_tick(void) {
         for (int i = 1; i < g_npl; i++) g_pl[i].ping_ms = 20 + (uint32_t)((now / 700000000ull + (uint64_t)i * 13) % 90);
     }
     for (int i = 1; i < g_npl; i++) {   // and they keep their place around the local player
-        int k = (int)(g_pl[i].id < 5 ? g_pl[i].id : 4) - 1;
+        int k = (int)(g_pl[i].id < 6 ? g_pl[i].id : 5) - 1;
         for (int c = 0; c < 3; c++) g_pl[i].pos[c] = g_local_pos[c] + g_off[k][c];
     }
 }
