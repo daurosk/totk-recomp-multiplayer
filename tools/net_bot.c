@@ -15,10 +15,12 @@
  *   flood NAME COUNT TYPE [field=value]...
  *   quiet NAME 0|1                   stop or restart the bot's own pings and its answers to the server's
  *   drop NAME                        close the socket without a goodbye
- *   walk NAME CX CY CZ [JITTER_MS] [LOSS_PCT]
+ *   walk NAME CX CY CZ [JITTER_MS] [LOSS_PCT] [SPIKE_MS]
  *                                    the bot becomes a moving puppet: self_state about 20 times a second along the
  *                                    tour of tools/net_bot_path.h around (CX, CY, CZ), each send moved by up to
- *                                    JITTER_MS and LOSS_PCT of them left out (needs features=1 at connect)
+ *                                    JITTER_MS and LOSS_PCT of them left out (needs features=1 at connect); with
+ *                                    SPIKE_MS, every 1.5 to 3 s the states of the next SPIKE_MS are held back and
+ *                                    then sent together, as a stalled link delivers them
  *   stand NAME                       stops walking
  *   echo TEXT                        prints {"ev":"echo","text":TEXT} once the commands before it ran
  *   quit
@@ -39,6 +41,8 @@
 
 enum { B_FREE, B_GREETED, B_LIVE, B_RAW, B_CLOSED };
 
+#define BOT_HELD_MAX 16     /* a delay spike holds at most this many states (0.8 s at 20 a second) */
+
 typedef struct bot {
     int state;
     char name[32];
@@ -53,9 +57,11 @@ typedef struct bot {
     int quiet, badsig;
     uint64_t next_ping;
     int64_t clock_off;     /* server clock minus ours, from admit */
-    int walking, jitter_ms, loss_pct;
+    int walking, jitter_ms, loss_pct, spike_ms;
     double centre[3];
-    uint64_t next_walk;
+    uint64_t next_walk, next_spike, spike_until;
+    int nheld;
+    ow_self_state held[BOT_HELD_MAX];   /* states of the current delay spike, sent when it ends */
 } bot;
 
 enum { BOTS = 64 };
@@ -505,6 +511,11 @@ static void bot_read(bot *b) {
     }
 }
 
+static void walk_flush(bot *b) {
+    for (int i = 0; i < b->nheld; i++) send_msg(b, OW_T_self_state, &b->held[i]);
+    b->nheld = 0;
+}
+
 /* One step of a walking bot: its state at this moment of the tour, on the server clock. */
 static uint32_t g_rng = 12345;
 static uint32_t rnd(void) {
@@ -535,6 +546,18 @@ static void walk_step(bot *b, uint64_t now) {
     if (pt.piece == 2) {
         ow_c_glide g = { .on = 1, .lean = 0 };
         if (!ow_comp_put(&m.comps[m.comps_count], OW_C_glide, &g)) m.comps_count++;
+    }
+    if (b->spike_ms > 0) {
+        if (!b->next_spike) b->next_spike = now + 1500000u + rnd() % 1500000u;
+        if (now >= b->next_spike) {
+            b->spike_until = now + (uint64_t)b->spike_ms * 1000;
+            b->next_spike = b->spike_until + 1500000u + rnd() % 1500000u;
+        }
+        if (now < b->spike_until && b->nheld < BOT_HELD_MAX) {
+            b->held[b->nheld++] = m;
+            return;
+        }
+        walk_flush(b);
     }
     send_msg(b, OW_T_self_state, &m);
 }
@@ -574,8 +597,10 @@ static int run_command(char *line) {
         for (int k = 0; k < 3; k++) b->centre[k] = atof(argv[2 + k]);
         b->jitter_ms = argc >= 6 ? atoi(argv[5]) : 0;
         b->loss_pct = argc >= 7 ? atoi(argv[6]) : 0;
+        b->spike_ms = argc >= 8 ? atoi(argv[7]) : 0;
         b->walking = 1;
-        b->next_walk = 0;
+        b->next_walk = b->next_spike = b->spike_until = 0;
+        b->nheld = 0;
     } else if (!strcmp(c, "stand") && argc >= 2 && find(argv[1])) find(argv[1])->walking = 0;
     else if (!strcmp(c, "bye") && argc >= 2 && find(argv[1]) && find(argv[1])->state == B_LIVE) {
         ow_bye m;

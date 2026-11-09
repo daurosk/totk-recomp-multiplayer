@@ -618,6 +618,13 @@ def run_p(exe_srv, exe_bot, exe_cl, tmp):
         r = cl.expect('puppetcheck', 25)
         check(r is not None and r['gaps'] == 0 and r['p95'] <= 0.3,
               f'puppets: p95 within 0.3 m with 20 ms jitter and 10 % loss ({r})')
+        # delay spikes: every 1.5 to 3 s the link stalls for 150 ms and then delivers the held states together
+        bots.cmd('walk wa 0 0 0 10 0 150')
+        time.sleep(3.0)
+        cl.cmd(f'puppetcheck {WA} 0 0 0 16')
+        r = cl.expect('puppetcheck', 25)
+        check(r is not None and r['gaps'] == 0 and r['p95'] <= 0.3,
+              f'puppets: p95 within 0.3 m with 150 ms delay spikes ({r})')
         bots.cmd('walk wa 0 0 0')
         # the walker loads: its puppet fades and goes
         bots.send('wa', 'area', **{'where.state': 2})
