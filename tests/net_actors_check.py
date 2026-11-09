@@ -1,4 +1,5 @@
-"""Offline lab for actor sync: builds tests/net_actors_lab.c with runtime/net/net_actors.c and the wire codec, and runs it.
+"""Offline lab for actor sync: builds tests/net_actors_lab.c with runtime/net/net_actors.c and the wire codec, and
+tests/net_actors_link_lab.c with the link to the network thread (runtime/net/net_actors_link.c) too, and runs both.
 
     python tests/net_actors_check.py
 
@@ -13,8 +14,10 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCES = [ROOT / 'tests' / 'net_actors_lab.c', ROOT / 'runtime' / 'net' / 'net_actors.c',
-           ROOT / 'online' / 'proto' / 'ow_codec.c', ROOT / 'online' / 'proto' / 'ow_classes.c']
+CORE = [ROOT / 'runtime' / 'net' / 'net_actors.c', ROOT / 'online' / 'proto' / 'ow_codec.c',
+        ROOT / 'online' / 'proto' / 'ow_classes.c']
+LABS = (('core', [ROOT / 'tests' / 'net_actors_lab.c'] + CORE),
+        ('link', [ROOT / 'tests' / 'net_actors_link_lab.c', ROOT / 'runtime' / 'net' / 'net_actors_link.c'] + CORE))
 
 
 def compiler():
@@ -31,10 +34,13 @@ def main():
         env['PATH'] = r'C:\msys64\ucrt64\bin;' + env.get('PATH', '')
     failures = 0
     with tempfile.TemporaryDirectory() as tmp:
-        for name, extra in (('O2', ['-O2']), ('checked', ['-O1', '-g', '-fsanitize=undefined', '-fsanitize-trap=undefined'])):
+        for (lab, sources), (name, extra) in ((l, b) for l in LABS for b in (
+                ('O2', ['-O2']), ('checked', ['-O1', '-g', '-fsanitize=undefined', '-fsanitize-trap=undefined']))):
+            name = f'{lab}-{name}'
             exe = Path(tmp) / f'net_actors_lab-{name}.exe'
-            cmd = compiler() + ['-std=gnu11', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'online' / 'proto')] + extra
-            p = subprocess.run(cmd + [str(s) for s in SOURCES] + ['-o', str(exe), '-lm'], capture_output=True, text=True,
+            cmd = compiler() + ['-std=gnu11', '-Wall', '-Wextra', '-Werror', '-I', str(ROOT / 'online' / 'proto'),
+                                '-I', str(ROOT / 'runtime')] + extra
+            p = subprocess.run(cmd + [str(s) for s in sources] + ['-o', str(exe), '-lm'], capture_output=True, text=True,
                                env=env)
             if p.returncode:
                 sys.exit(f'build ({name}) failed:\n{p.stderr}')

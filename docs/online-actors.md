@@ -10,9 +10,10 @@ to the owner and counts there; life travels in the owner's states, so it is equa
 | Part | File | State |
 |---|---|---|
 | Sync core: roles, epochs, offers, states, copies, hits, gone, spawn rule, wildlife leader rule | `runtime/net/net_actors.c`, `.h` | done, offline lab passes |
-| Offline lab: two invented games and a stub server, every message through the real codec | `tests/net_actors_lab.c`, `tests/net_actors_check.py` | 38 checks, built optimised and with UB traps |
+| Offline lab: two invented games and a stub server, every message through the real codec | `tests/net_actors_lab.c`, `tests/net_actors_check.py` | 38 checks (and 24 of the link), built optimised and with UB traps |
 | Game side: `NaGame` over the recompiled game (scan, make a copy, drive, AI off, hit, removal) | `runtime/net_actors_game.c` | **scan only** (`na_game_scan`, read-only, 1.2.1); `na_game()` is NULL until copies can be made, driven and removed |
-| Hook into `net_client.c`: offer `OW_FEAT_ACTORS`, queue 0x04xx frames for the frame step, send the core's messages | `runtime/net/net_client.c` | **not started**: waits for the game side, so the feature is never offered without it |
+| Link to the network thread: two queues of encoded payloads, the offer, the grant, loss and re-admit | `runtime/net/net_actors_link.c`, `.h` | done, `tests/net_actors_link_lab.c` passes |
+| Hook into `net_client.c`: offer `OW_FEAT_ACTORS`, hand 0x04xx frames to the link, send the core's messages, step each frame | `runtime/net/net_client.c` | done; inert while `na_game()` is NULL (nothing offered, nothing stepped) |
 
 ## The core
 
@@ -46,6 +47,29 @@ life. Ids are the wire's `aid`: placed actors by map instance id, run-time ones 
 The class and the components of an actor come from the class table both ends compile (`online/proto/classes.txt`,
 `ow_class_find`); `na_class_of` reads it. Items are left to the loot work: `shared_class` in the core does not share
 class `item` yet. `take` and `taken` are the server's (first take wins) and not in the core yet.
+
+## The link
+
+`runtime/net/net_actors_link.c` sits between `net_client.c`'s network thread and the core:
+
+- The sign-in offers `OW_FEAT_ACTORS` only when `na_game()` returns an adapter (`nal_offer`), so a build whose game side
+  cannot make copies never asks for the add-on and the server never sends it 0x04xx frames.
+- `admit` passes the account, `server_time_us` (the serial base of run-time ids and the first clock offset) and the
+  granted add-ons (`nal_admitted`). Without the grant the core does not step and frames of the add-on are dropped.
+- `on_frame` hands every server-to-client frame of the add-on to the link undecoded, before its own decode, so
+  `net_client.c`'s message union does not grow by the large actor structs; the game side decodes it. The core's
+  messages go the other way encoded and are decoded again on the network thread just before `send_msg` seals them.
+  Each direction is one 512 KiB queue; a full queue drops the new record and counts it (`nal_stats`).
+- Every connection end (`conn_close`) is a loss: on its next tick the game side calls `na_offline` (copies removed,
+  the rest given back to the game's own AI). A new admit sets the account and serial base again and the next scan
+  offers every placed actor anew.
+- `nal_tick` runs from `net_tick`, once per presented frame, with the player's position for the herd cell. That is the
+  present thread, which is right for the read-only scan; `make_copy`, `drive` and `remove` write game state and must
+  run in the game's own frame step, so the call moves there with the first adapter that writes.
+- Not done: the clock offset is the one from admit (one-way delay off); `nal_clock` takes a better one once the pong
+  round trips are measured (the puppets branch does that for its own use).
+- The loot work handles `spawned` and `taken` of items in `net_client.c` on its own branch; when both land, those two
+  types must reach both the link and the loot code.
 
 ## Answered by the server side (docs/online-wire.md 9.1)
 

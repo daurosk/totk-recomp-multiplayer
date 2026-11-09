@@ -51,6 +51,7 @@ typedef int nsock;
 
 #include "cfg.h"
 #include "host.h"
+#include "net/net_actors_link.h"
 #include "net/net_client.h"
 #include "net/net_fake.h"
 #include "ow_wire.h"
@@ -667,6 +668,11 @@ static void on_mod_done(void) {
 // One frame from the server. Returns END_NONE to go on, or how the connection ends.
 static int on_frame(const ow_frame *f, unsigned gen) {
     (void)gen;
+    // frames of the actors add-on go to the game side as they came and are decoded there (net/net_actors_link.c)
+    if (nal_is_from_server(f->type)) {
+        nal_from_server(f->type, f->payload, f->len);
+        return END_NONE;
+    }
     int e = ow_decode(f->type, f->payload, f->len, &M);
     if (e) {
         snprintf(C.why, sizeof C.why, "The server sent something this game could not read (%s).", ow_strerror(e));
@@ -684,7 +690,7 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         plat_mutex_lock(&S.mx);
         uint8_t ch = S.character;
         plat_mutex_unlock(&S.mx);
-        e = ow_hs_client_challenge(&C.hs, &M.challenge, C.have_pin ? C.pin : NULL, &C.id, nick, ch, claim, OW_FEAT_CORE, &pr);
+        e = ow_hs_client_challenge(&C.hs, &M.challenge, C.have_pin ? C.pin : NULL, &C.id, nick, ch, claim, OW_FEAT_CORE | nal_offer(), &pr);
         if (!e) e = ow_hs_seal(&C.hs, &C.link);
         ow_hs_wipe(&C.hs);
         wipe(claim, sizeof claim);
@@ -708,6 +714,7 @@ static int on_frame(const ow_frame *f, unsigned gen) {
     case OW_T_admit:
         if (C.phase != P_PROOF) break;
         ow_link_set_features(&C.link, M.admit.features);
+        nal_admitted(M.admit.account, M.admit.server_time_us, M.admit.features);
         if (!C.have_pin) pin_save(C.pin);
         if (C.admitted && C.account != M.admit.account) room_clear();
         C.account = M.admit.account;
@@ -970,6 +977,7 @@ static int attempt(unsigned gen) {
         if (C.phase == P_LIVE) {
             send_commands();
             send_reports(now);
+            if (nal_send_out(send_msg) == -1000) return END_LOST;
         }
         if (C.phase >= P_JOINING && now >= C.next_ping) {
             ow_ping p = {.seq = ++C.ping_seq, .sent_us = now};
@@ -1024,6 +1032,7 @@ static int attempt(unsigned gen) {
 }
 
 static void conn_close(void) {
+    nal_lost();
     sock_close(C.s);
     C.s = NSOCK_BAD;
     ow_hs_wipe(&C.hs);
@@ -1247,6 +1256,8 @@ void net_tick(void) {
         if (G.nev == NC_EVENTS) memmove(G.ev, G.ev + 1, (size_t)(--G.nev) * sizeof *G.ev);
         G.ev[G.nev++] = evs[i];
     }
+    // actor sync steps here, once per presented frame, until the game side has a hook in the game's own frame step
+    nal_tick(G.have_pos ? G.pos : NULL);
 }
 
 int net_players(NetPlayer *out, int max) {

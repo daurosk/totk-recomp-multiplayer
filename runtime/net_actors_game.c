@@ -15,7 +15,7 @@
 
 #include "host.h"
 #include "layout.h"
-#include "net/net_actors.h"
+#include "net/net_actors_link.h"
 #include "platform/platform.h"
 
 #define LISTS 32
