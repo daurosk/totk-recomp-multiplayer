@@ -1,0 +1,46 @@
+case fight-lock An enemy in a fight stays with its owner; once the fight is 10 s over, rule 3 may move it
+# 2026-11-03: 22 enemy owner changes in the whole session, with the fight lock on. A player hitting a copy every 3 s
+# keeps it with the owner even when much closer.
+player A
+player B
+actor Boko 0:801 Enemy_Bokoblin_Junior 0,0,0
+# It moves about the whole time, as an enemy facing a player does: still things are rule 5's.
+walk Boko 0 3 0,0,0 -2,0,2
+walk Boko 3 6 -2,0,2 0,0,0
+walk Boko 6 9 0,0,0 -2,0,2
+walk Boko 9 12 -2,0,2 0,0,0
+walk Boko 12 15 0,0,0 -2,0,2
+walk Boko 15 18 -2,0,2 0,0,0
+walk Boko 18 21 0,0,0 -2,0,2
+walk Boko 21 24 -2,0,2 0,0,0
+walk Boko 24 27 0,0,0 -2,0,2
+walk Boko 27 30 -2,0,2 0,0,0
+walk Boko 30 33 0,0,0 -2,0,2
+walk Boko 33 36 -2,0,2 0,0,0
+walk Boko 36 39 0,0,0 -2,0,2
+walk Boko 39 42 -2,0,2 0,0,0
+walk Boko 42 45 0,0,0 -2,0,2
+walk Boko 45 48 -2,0,2 0,0,0
+walk Boko 48 51 0,0,0 -2,0,2
+walk Boko 51 54 -2,0,2 0,0,0
+walk Boko 54 57 0,0,0 -2,0,2
+walk Boko 57 60 -2,0,2 0,0,0
+walk A 0 1 40,0,0 40,0,0
+walk B 0 1 -60,0,0 -60,0,0
+walk B 5 10 -60,0,0 -5,0,0
+at 0 A join
+at 0 B join
+at 11 B hit Boko
+at 14 B hit Boko
+at 17 B hit Boko
+at 20 B hit Boko
+at 23 B hit Boko
+at 26 B hit Boko
+at 29 B hit Boko
+at 32 B hit Boko
+run 60
+expect owner Boko at 40 is A
+expect kept fight >= 10
+expect got A hit_in Boko == 8
+expect owner Boko at 44 is B
+expect cause Boko closer == 1

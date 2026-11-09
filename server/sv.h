@@ -20,10 +20,10 @@
 #define SV_MAX_CONNS 96
 /* Handshakes in progress at once, over all addresses. */
 #define SV_MAX_PENDING 32
-/* Add-ons this build grants (docs/online-wire.md, "Features and add-ons"). Release 1 grants the economy (wallet, Lights
- * ledger) and the sky clock; the rest of an offer is answered with 0. An add-on is plugged in by implementing its message types in sv_room.c's
- * dispatch, then adding its OW_FEAT_* bit here. */
-#define SV_FEATURES_GRANTED (OW_FEAT_ECONOMY | OW_FEAT_SKY)
+/* Add-ons this build grants (docs/online-wire.md, "Features and add-ons"); a client's offer is answered with the
+ * bits it offered of these. An add-on is plugged in by implementing its message types in sv_room.c's dispatch,
+ * then adding its OW_FEAT_* bit here. Actors: sv_actors.c; economy and sky: sv_econ.c and sv_room.c. */
+#define SV_FEATURES_GRANTED (OW_FEAT_ACTORS | OW_FEAT_ECONOMY | OW_FEAT_SKY)
 
 /* ---- configuration (sv_store.c) ---- */
 typedef struct sv_config {

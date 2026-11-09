@@ -318,13 +318,14 @@ static int run(char *line) {
         NetActorId id;
         memset(&d, 0, sizeof d);
         snprintf(d.name, sizeof d.name, "%s", a);
-        d.fused = (uint32_t)strtoul(b, NULL, 0);
+        snprintf(d.fuse_name, sizeof d.fuse_name, "%s", b);
         d.pos[0] = 1;
         d.pos[1] = 2;
         d.pos[2] = 3;
-        int r = net_loot_drop(&d, &id);
-        printf("{\"ev\":\"lootid\",\"r\":%d,\"origin\":%llu,\"serial\":%llu}\n", r, (unsigned long long)id.origin,
-               (unsigned long long)id.serial);
+        NetActorId fid = {0, 0};
+        int r = net_loot_drop(&d, &id, &fid);
+        printf("{\"ev\":\"lootid\",\"r\":%d,\"origin\":%llu,\"serial\":%llu,\"fuse_serial\":%llu}\n", r,
+               (unsigned long long)id.origin, (unsigned long long)id.serial, (unsigned long long)fid.serial);
     } else if (!strcmp(cmd, "loottake")) {
         NetActorId id = {strtoull(a, NULL, 10), strtoull(b, NULL, 10)};
         ret(cmd, net_loot_take(id));
@@ -380,9 +381,9 @@ int main(int argc, char **argv) {
         int nle;
         while ((nle = net_loot_poll(le, 8)) > 0)
             for (int i = 0; i < nle; i++)
-                printf("{\"ev\":\"loot\",\"type\":%d,\"origin\":%llu,\"serial\":%llu,\"who\":%llu,\"yours\":%u,\"name\":\"%s\",\"fused\":%u,\"on\":%d}\n",
+                printf("{\"ev\":\"loot\",\"type\":%d,\"origin\":%llu,\"serial\":%llu,\"who\":%llu,\"yours\":%u,\"name\":\"%s\",\"parent\":%llu,\"on\":%d}\n",
                        (int)le[i].type, (unsigned long long)le[i].id.origin, (unsigned long long)le[i].id.serial,
-                       (unsigned long long)le[i].who, le[i].yours, le[i].drop.name, le[i].drop.fused, net_loot_on());
+                       (unsigned long long)le[i].who, le[i].yours, le[i].drop.name, (unsigned long long)le[i].drop.parent.serial, net_loot_on());
         uint32_t serial = net_chat_serial();
         int count = net_chat_count();
         int fresh = (int)(serial - seen) < count ? (int)(serial - seen) : count;

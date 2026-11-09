@@ -1,0 +1,27 @@
+case glued-group A glued structure is decided as one: a hold of one part takes all of it, and owner far moves it together
+player A
+player B
+actor Box1 0:1501 Obj_Box_A 0,0,0
+actor Box2 0:1502 Obj_Box_A 1,0,0
+actor Box3 0:1503 Obj_Box_A 0,0,1
+walk A 0 1 5,0,0 5,0,0
+walk A 20 40 5,0,0 260,0,0
+walk B 0 1 -30,0,0 -30,0,0
+at 0 A join
+at 0 B join
+at 5 A group G 1:900 Box1 Box2 Box3
+at 10 B hold Box1 ultrahand on
+at 12 B hold Box1 ultrahand off
+at 13 A hold Box2 carry on
+at 14 A hold Box2 carry off
+run 80
+expect owner Box2 at 11 is B
+expect owner Box3 at 11 is B
+expect cause Box3 hold == 2
+expect owner Box1 at 15 is A
+expect owner Box3 at 79 is B
+# Lying still, the boxes keep their far owner until its game unloads them.
+expect owner Box1 at 30 is A
+expect cause Box1 left == 1
+expect cause Box2 left == 1
+expect cause Box3 left == 1

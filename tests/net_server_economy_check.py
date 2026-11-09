@@ -55,7 +55,7 @@ def last_ledger(bots, who):
 
 def test_join(srv, bots):
     a = bots.connect('alice', 'seedAlice', 'Alice', features=255)
-    check(a.get('features') == ECONOMY | SKY, f'only the economy and the sky clock are granted ({a.get("features")})')
+    check(a.get('features') == 4 | ECONOMY | SKY, f'the actors, economy and sky add-ons are granted, nothing else ({a.get("features")})')
     w = bots.expect('alice', 'wallet', 2)
     check(w is not None and w['seq'] == 0 and w['rupees'] == 100, 'a joining game is told its rupees (the start amount)')
     l = bots.expect('alice', 'ledger', 2)

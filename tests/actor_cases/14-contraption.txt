@@ -1,0 +1,22 @@
+case contraption A vehicle with no glue reported went to the closer player part by part, so the driver steered copies (s1.contraption)
+# A fan and two planks within 6 m are one cluster, since the fan is a core part. An Ultrahand grab of one plank takes
+# all three for the grabber, and they stay together.
+player A
+player B
+actor Fan 0:1401 SpObj_FanEngine_A 0,0,0
+actor PlankA 0:1402 AsbObj_Plank_A 3,0,0
+actor PlankB 0:1403 AsbObj_Plank_B 0,0,4
+walk A 0 1 10,0,0 10,0,0
+walk B 0 1 -15,0,0 -15,0,0
+at 0 A join
+at 0 B join
+at 20 B hold PlankA ultrahand on
+at 30 B hold PlankA ultrahand off
+run 60
+expect changes all in 0..19 == 3
+expect owner Fan at 21 is B
+expect owner PlankA at 21 is B
+expect owner PlankB at 21 is B
+expect cause PlankA hold == 1
+expect cause Fan hold == 1
+expect changes all in 20..60 == 3

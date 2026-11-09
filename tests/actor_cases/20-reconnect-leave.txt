@@ -1,0 +1,20 @@
+case reconnect-leave A dropped connection keeps its actors while nobody near can take them; a reconnect finds them; leaving for good frees them
+# Nobody has the actor loaded once A leaves, so its record goes; B's game offers it anew when it comes near.
+player A
+player B
+actor Boko 0:2001 Enemy_Bokoblin_Junior 0,0,0
+walk A 0 1 30,0,0 30,0,0
+walk B 0 1 -220,0,0 -220,0,0
+walk B 60 70 -220,0,0 -50,0,0
+at 0 A join
+at 0 B join
+at 10 A away
+at 20 A join
+at 40 A leave
+run 90
+expect owner Boko at 15 is A
+expect owner Boko at 30 is A
+expect changes Boko in 0..39 == 1
+expect owner Boko at 41 is none
+expect owner Boko at 75 is B
+expect cause Boko left == 1

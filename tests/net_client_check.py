@@ -522,8 +522,8 @@ def run_eco(exe_srv, exe_bot, exe_cl, tmp):
         check(e['lights_spent'] == 1, 'and one spent')
         on.cmd('lootdrop Item_Test 0')
         ev = on.expect('lootid', 3)
-        check(ev is not None and ev['r'] == 0, 'loot off: a drop is not sent when the server grants no actors add-on')
-        b = bots.connect('bot', 'seedEcoBot', 'Bot', features=16 | 64)
+        check(ev is not None and ev['r'] == 0, 'loot off: a drop is not sent when the switch is off')
+        b = bots.connect('bot', 'seedEcoBot', 'Bot', features=4 | 16 | 64)
         check(b.get('ev') == 'admit', 'a bot joins the same room')
         bots.send('bot', 'ledger_note', what=2, key=0x777, count=1)
         for _ in range(25):
@@ -538,6 +538,34 @@ def run_eco(exe_srv, exe_bot, exe_cl, tmp):
         bots.send('bot', 'sky', **{'info.day': 99, 'info.hour': 1.0, 'info.blood_moon_due': 0})
         time.sleep(0.5)
         check(eco(on)['sky'] == 0, 'a clock from a game that does not lead does not reach the leader')
+        # ---- shared loot: the client makes a fused drop, a bot sees both and takes one, the client sees it taken
+        lc = Client(exe_cl, tmp / 'profile-loot', env={'TOTK_NET_LOOT': '1'})
+        try:
+            ev = lc.online(addr, 'Looter')
+            check(ev is not None and ev['state'] == ONLINE, 'loot on: the client joins')
+            lc.cmd('pos 10 20 30')
+            bots.send('bot', 'area', **{'where.scene': 0, 'where.state': 1})
+            bots.send('bot', 'position', scene=0, pos=[10, 20, 30], yaw=0.0)
+            lc.cmd('lootdrop Item_Test Item_Fuse')
+            ev = lc.expect('lootid', 3)
+            check(ev is not None and ev['r'] == 1 and ev['serial'] != ev['fuse_serial'],
+                  'a drop with a fused material is sent as two drops with their own ids')
+            sp = bots.expect('bot', 'spawned', 4)
+            sp2 = bots.expect('bot', 'spawned', 4)
+            names = sorted(x['info']['name'] for x in (sp, sp2) if x)
+            check(names == ['Item_Fuse', 'Item_Test'], f'the other game gets both drops ({names})')
+            if ev and sp and sp2:
+                weapon = next(x for x in (sp, sp2) if x['info']['name'] == 'Item_Test')
+                fuse = next(x for x in (sp, sp2) if x['info']['name'] == 'Item_Fuse')
+                check(fuse['info']['parent']['serial'] == weapon['info']['id']['serial'], 'the fuse part has the weapon as its parent')
+                bots.send('bot', 'take', **{'id.origin': weapon['info']['id']['origin'], 'id.serial': weapon['info']['id']['serial'], 'epoch': 1})
+                t = bots.expect('bot', 'taken', 4)
+                check(t and t['yours'] == 1, 'the first to take a drop gets it')
+                lc.cmd(f"loottake {weapon['info']['id']['origin']} {weapon['info']['id']['serial']}")
+                got = lc.expect('loot', 4, lambda e: e['type'] == 2)
+                check(got is not None and got['yours'] == 0, 'a second take of it is told it is not theirs')
+        finally:
+            lc.stop()
     finally:
         off.stop()
         on.stop()

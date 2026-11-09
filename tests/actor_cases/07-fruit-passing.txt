@@ -1,0 +1,59 @@
+case fruit-passing Item_Fruit_A#472 changed owner 11 times in a minute at 21:07 on 2026-11-03: two players a few metres apart walking past it
+# Every 5 s one player comes within 2 m while the other is 8 m away. A pick-up with both players within 20 m waits
+# 20 s after the last change, and the still rule holds rule 3.
+player A
+player B
+actor Fruit 0:472 Item_Fruit_A 0,0,0
+walk A 0 5 8,0,0 2,0,0
+walk A 5 10 2,0,0 8,0,0
+walk A 10 15 8,0,0 2,0,0
+walk A 15 20 2,0,0 8,0,0
+walk A 20 25 8,0,0 2,0,0
+walk A 25 30 2,0,0 8,0,0
+walk A 30 35 8,0,0 2,0,0
+walk A 35 40 2,0,0 8,0,0
+walk A 40 45 8,0,0 2,0,0
+walk A 45 50 2,0,0 8,0,0
+walk A 50 55 8,0,0 2,0,0
+walk A 55 60 2,0,0 8,0,0
+walk A 60 65 8,0,0 2,0,0
+walk A 65 70 2,0,0 8,0,0
+walk A 70 75 8,0,0 2,0,0
+walk A 75 80 2,0,0 8,0,0
+walk A 80 85 8,0,0 2,0,0
+walk A 85 90 2,0,0 8,0,0
+walk A 90 95 8,0,0 2,0,0
+walk A 95 100 2,0,0 8,0,0
+walk A 100 105 8,0,0 2,0,0
+walk A 105 110 2,0,0 8,0,0
+walk A 110 115 8,0,0 2,0,0
+walk A 115 120 2,0,0 8,0,0
+walk B 0 5 -2,0,0 -8,0,0
+walk B 5 10 -8,0,0 -2,0,0
+walk B 10 15 -2,0,0 -8,0,0
+walk B 15 20 -8,0,0 -2,0,0
+walk B 20 25 -2,0,0 -8,0,0
+walk B 25 30 -8,0,0 -2,0,0
+walk B 30 35 -2,0,0 -8,0,0
+walk B 35 40 -8,0,0 -2,0,0
+walk B 40 45 -2,0,0 -8,0,0
+walk B 45 50 -8,0,0 -2,0,0
+walk B 50 55 -2,0,0 -8,0,0
+walk B 55 60 -8,0,0 -2,0,0
+walk B 60 65 -2,0,0 -8,0,0
+walk B 65 70 -8,0,0 -2,0,0
+walk B 70 75 -2,0,0 -8,0,0
+walk B 75 80 -8,0,0 -2,0,0
+walk B 80 85 -2,0,0 -8,0,0
+walk B 85 90 -8,0,0 -2,0,0
+walk B 90 95 -2,0,0 -8,0,0
+walk B 95 100 -8,0,0 -2,0,0
+walk B 100 105 -2,0,0 -8,0,0
+walk B 105 110 -8,0,0 -2,0,0
+walk B 110 115 -2,0,0 -8,0,0
+walk B 115 120 -8,0,0 -2,0,0
+at 0 A join
+at 0 B join
+run 120
+expect rate Fruit in 0..120 <= 3.5
+expect kept recent >= 1

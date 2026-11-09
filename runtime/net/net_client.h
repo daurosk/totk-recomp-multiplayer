@@ -172,7 +172,8 @@ int net_sky_send(uint32_t day, float hour, int blood_moon_due);   // only the le
 // that game calls net_loot_drop, and every other game in range gets a NET_LOOT_SPAWNED event to make the same thing.
 // A drop is its own record and can be taken once: the game whose player picks it up calls net_loot_take and puts
 // nothing in the pouch until NET_LOOT_TAKEN says yours; every other game removes its copy. A fused drop (a weapon with
-// a material fused to it) carries the material's name hash in `fused`.
+// a material fused to it) is two drops, the weapon and the fuse part, each with its own id and the weapon as the
+// part's parent (docs/online-wire.md, 9.1); the other games get two NET_LOOT_SPAWNED events and take either by its id.
 typedef struct {
     uint64_t origin, serial;        // the actor's id; a drop's origin is the account that made it
 } NetActorId;
@@ -181,7 +182,7 @@ typedef struct {
     char name[64];                  // the game's actor name of the drop
     float pos[3];
     float vel[3];                   // a drop that is thrown or falls starts with this
-    uint32_t fused;                 // name hash of the material fused to it, 0 for none
+    char fuse_name[64];             // net_loot_drop only: the material fused to it, made as a second drop; "" for none
 } NetLootDrop;
 typedef enum { NET_LOOT_SPAWNED = 1, NET_LOOT_TAKEN = 2 } NetLootType;
 typedef struct {
@@ -192,8 +193,9 @@ typedef struct {
     NetLootDrop drop;               // SPAWNED
 } NetLootEvent;
 int net_loot_on(void);           // the switch is on and the server granted the actors add-on
-// Tells the others about a drop this game made. Fills *id (when given) with the id to take it by. 1 when sent.
-int net_loot_drop(const NetLootDrop *drop, NetActorId *id);
+// Tells the others about a drop this game made. Fills *id (when given) with the id to take it by and, for a fused
+// drop, *fuse_id (when given) with the fuse part's. 1 when sent.
+int net_loot_drop(const NetLootDrop *drop, NetActorId *id, NetActorId *fuse_id);
 int net_loot_take(NetActorId id);
 int net_loot_poll(NetLootEvent *out, int max);   // oldest first; returns how many
 

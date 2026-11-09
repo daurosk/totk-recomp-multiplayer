@@ -844,10 +844,6 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         copy_text(ev.drop.name, sizeof ev.drop.name, M.spawned.info.name);
         memcpy(ev.drop.pos, M.spawned.info.body.pos, sizeof ev.drop.pos);
         memcpy(ev.drop.vel, M.spawned.info.body.vel, sizeof ev.drop.vel);
-        for (int i = 0; i < M.spawned.info.comps_count; i++) {
-            ow_c_gear g;
-            if (M.spawned.info.comps[i].kind == 3 && !ow_comp_get(&M.spawned.info.comps[i], &g)) ev.drop.fused = g.weapon_fuse;
-        }
         loot_put(&ev);
         break;
     }
@@ -1690,31 +1686,38 @@ int net_loot_on(void) {
     return on;
 }
 
-int net_loot_drop(const NetLootDrop *d, NetActorId *id) {
-    if (!d || !net_loot_on()) return 0;
-    Cmd c;
-    memset(&c, 0, sizeof c);
-    c.type = OW_T_spawn;
-    ow_spawn_info *i = &c.m.spawn.info;
+// One drop's spawn message, with the next id of this game's counter.
+static void loot_spawn(Cmd *c, const char *name, NetActorId parent, const float pos[3], const float vel[3], NetActorId *id) {
+    memset(c, 0, sizeof *c);
+    c->type = OW_T_spawn;
+    ow_spawn_info *i = &c->m.spawn.info;
     plat_mutex_lock(&S.mx);
     i->id.origin = S.account;
     i->id.serial = S.spawn_next++;
     plat_mutex_unlock(&S.mx);
-    i->parent.origin = d->parent.origin;
-    i->parent.serial = d->parent.serial;
+    i->parent.origin = parent.origin;
+    i->parent.serial = parent.serial;
     i->class_ = OW_CLASS_ITEM;
-    copy_text(i->name, sizeof i->name, d->name);
-    memcpy(i->body.pos, d->pos, sizeof i->body.pos);
-    memcpy(i->body.vel, d->vel, sizeof i->body.vel);
+    copy_text(i->name, sizeof i->name, name);
+    memcpy(i->body.pos, pos, sizeof i->body.pos);
+    memcpy(i->body.vel, vel, sizeof i->body.vel);
     i->body.rot[3] = 1.0f;
-    if (d->fused) {
-        ow_c_gear g;
-        memset(&g, 0, sizeof g);
-        g.weapon_fuse = d->fused;
-        if (!ow_comp_put(&i->comps[0], 3, &g)) i->comps_count = 1;
+    *id = (NetActorId){i->id.origin, i->id.serial};
+}
+
+int net_loot_drop(const NetLootDrop *d, NetActorId *id, NetActorId *fuse_id) {
+    if (!d || !net_loot_on()) return 0;
+    Cmd c;
+    NetActorId mine, fuse = {0, 0};
+    loot_spawn(&c, d->name, d->parent, d->pos, d->vel, &mine);
+    int ok = push(&c);
+    if (ok && d->fuse_name[0]) {
+        loot_spawn(&c, d->fuse_name, mine, d->pos, d->vel, &fuse);
+        ok = push(&c);
     }
-    if (id) *id = (NetActorId){i->id.origin, i->id.serial};
-    return push(&c);
+    if (id) *id = mine;
+    if (fuse_id) *fuse_id = fuse;
+    return ok;
 }
 
 int net_loot_take(NetActorId id) {

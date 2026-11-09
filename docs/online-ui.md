@@ -134,7 +134,7 @@ per-player key API.
 `net_loot = 1` (off by default) makes the client offer the actors add-on, which the release 1 server of this branch does
 not grant yet (the owner rules and the records are `online-wire.md`, 9.1). With it, a game that owns what made a drop
 (an enemy, a chest, a broken object) calls `net_loot_drop` once, so the drop exists once for the room as an item record
-with the maker as its parent (a fused drop carries the fused material's name hash); the other games get a
+with the maker as its parent (a fused drop is two drops, the weapon and the fuse part, each with its own id); the other games get a
 `NET_LOOT_SPAWNED` event from `net_loot_poll` and make the same thing. A game whose player picks a drop up calls
 `net_loot_take` and adds nothing to the pouch until a `NET_LOOT_TAKEN` event says `yours`; the others remove their copy.
 Every call does nothing while `net_loot_on()` is 0.

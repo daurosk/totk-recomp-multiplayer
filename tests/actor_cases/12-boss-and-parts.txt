@@ -1,0 +1,23 @@
+case boss-and-parts A boss stays with its owner while a player is near, owner far only beyond 160 m; its parts follow it (s1.fightlock, s1.parts)
+# A Stalnox and two of the parts the old port synced as actors of their own: an arm and the eye. When the body
+# changes owner its parts go with it in the same second.
+player A
+player B
+actor Body 0:1201 Enemy_Giant_Bone 0,0,0
+actor Arm 0:1202 Enemy_Giant_Bone_Arm_L 3,0,0
+actor Eye 0:1203 Enemy_Giant_Bone_Eye 0,5,0
+walk A 0 1 20,0,0 20,0,0
+walk A 20 40 20,0,0 140,0,0
+walk A 60 70 140,0,0 175,0,0
+walk B 0 1 -20,0,0 -20,0,0
+at 0 A join
+at 0 B join
+run 100
+expect owner Body at 50 is A
+expect kept fight >= 10
+expect owner Body at 80 is B
+expect owner Arm at 80 is B
+expect owner Eye at 80 is B
+expect cause Body far == 1
+expect changes Arm == 2
+expect changes Eye == 2

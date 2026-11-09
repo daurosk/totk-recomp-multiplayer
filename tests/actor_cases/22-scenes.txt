@@ -1,0 +1,15 @@
+case scenes The same map id in two scenes is two actors (a shrine's ids against the field's, online-port-p60 section 6)
+player A scene=1
+player B scene=2
+actor Field 0:42 Obj_Box_A 0,0,0 scene=1
+actor Shrine 0:42 Obj_Box_A 0,0,0 scene=2
+walk A 0 1 10,0,0 10,0,0
+walk B 0 1 10,0,0 10,0,0
+at 0 A join
+at 0 B join
+run 20
+expect owner Field at 5 is A
+expect owner Shrine at 5 is B
+expect changes all == 2
+expect got A owner Shrine == 0
+expect got B recv Field == 0

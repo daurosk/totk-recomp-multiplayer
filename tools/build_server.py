@@ -47,10 +47,10 @@ def build(out_dir, debug=False, werror=False):
     flags += ['-O1', '-g', '-fsanitize=undefined', '-fsanitize-trap=undefined'] if debug else ['-O2']
     if not WIN:
         flags += ['-D_DEFAULT_SOURCE', '-D_POSIX_C_SOURCE=200809L', '-pthread']
-    libs = ['-lws2_32', '-lbcrypt'] if WIN else ['-pthread']
+    libs = ['-lws2_32', '-lbcrypt'] if WIN else ['-pthread', '-lm']
     shared = sorted(PROTO.glob('*.c')) + sorted(MONO.glob('*.c')) + [SERVER / 'sv_os.c']
     programs = {
-        'totk-server': [SERVER / n for n in ('sv_main.c', 'sv_room.c', 'sv_store.c', 'sv_econ.c')],
+        'totk-server': [SERVER / n for n in ('sv_main.c', 'sv_room.c', 'sv_store.c', 'sv_econ.c', 'sv_actors.c', 'sv_owner.c')],
         'net_bot': [ROOT / 'tools' / 'net_bot.c'],
     }
     objs = {}
