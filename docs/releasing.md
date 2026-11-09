@@ -31,7 +31,10 @@ versions show:
    gh release upload v0.1.0 build/release/TotKMP-Setup-0.1.0-windows.zip --clobber
    ```
 
-4. Read the draft: notes, files, sizes. Publish it by hand on GitHub.
+4. Sign the update ([updater.md](updater.md), "Releasing"): run the **Sign update** workflow with the tag (the key
+   is the repository secret `TOTKMP_UPDATE_KEY`), or build with `--sign-key` and upload `TotKMP-Update-windows.json` and
+   its `.sig` yourself. Without them the game's updater does not offer the release.
+5. Read the draft: notes, files, sizes. Publish it by hand on GitHub. Players get the update prompt at their next start.
 
 ## Why the setup is not built in CI
 

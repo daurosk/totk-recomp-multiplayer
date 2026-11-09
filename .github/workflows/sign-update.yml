@@ -1,0 +1,45 @@
+name: Sign update
+
+# Writes the signed update manifest (docs/updater.md) for a DRAFT release whose setup zip a person has uploaded
+# (docs/releasing.md): downloads TotKMP-Setup-<version>-windows.zip from the draft, runs tools/make_update.py with the
+# signing key from the repository secret TOTKMP_UPDATE_KEY, checks the result and uploads TotKMP-Update-windows.json and
+# its .sig to the same draft. It never touches a published release. The key reaches only make_update.py's environment;
+# the tool never prints it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The draft release's tag, v<version>"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install cryptography==50.0.2
+      - name: Sign the draft's setup zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOTKMP_UPDATE_KEY: ${{ secrets.TOTKMP_UPDATE_KEY }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+          case "$TAG" in v[0-9]*) ;; *) echo "the tag must be v<version>" >&2; exit 1 ;; esac
+          if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+            echo "release $TAG is not a draft; this workflow only touches drafts" >&2
+            exit 1
+          fi
+          version="${TAG#v}"
+          mkdir -p dist
+          gh release download "$TAG" --pattern "TotKMP-Setup-${version}-windows.zip" --dir dist
+          python tools/make_update.py --zip "dist/TotKMP-Setup-${version}-windows.zip" --out dist
+          python tools/make_update.py --verify dist --zip "dist/TotKMP-Setup-${version}-windows.zip"
+          gh release upload "$TAG" dist/TotKMP-Update-windows.json dist/TotKMP-Update-windows.json.sig --clobber

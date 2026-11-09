@@ -551,6 +551,12 @@ static void on_events() {
                 online_toast_ask(t, 2, e.request);
                 break;
             case NET_EV_TELEPORT_REQUEST:
+                // Teleport is on hold (net_teleport, default 0): no prompt, and the request is refused at once so
+                // the asking player is not left waiting.
+                if (!cfg_bool("TOTK_NET_TELEPORT")) {
+                    net_teleport_answer(e.request, false);
+                    break;
+                }
                 snprintf(t, sizeof t, "%s asks to teleport to you", e.name);
                 online_toast_ask(t, 1, e.request);
                 break;

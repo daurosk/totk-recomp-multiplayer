@@ -85,6 +85,10 @@ the top ring; they follow the four built-in ones, so the ring only goes past fou
 
 ## Teleport
 
+On hold for release 1, coming in a later version: the wheel's Teleport slice and the teleport request prompts show
+only with `net_teleport = 1` (`runtime/ui/online_wheel.cpp` `build`, `runtime/ui/online_ui.cpp`); with the default 0 a
+request from another player is refused at once. The code stays for when the move works.
+
 `teleport_to` (`runtime/teleport.c`) writes the player's position once per presented frame until it has stayed put, and
 logs `teleport: ...` lines with each frame's read-back.
 

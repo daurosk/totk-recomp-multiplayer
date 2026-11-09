@@ -276,7 +276,10 @@ static std::vector<Slice> build(const RingDesc &r) {
     std::vector<Slice> v;
     switch (r.kind) {
     case R_TOP: {
-        v.push_back(mk("Teleport", IC_PIN, "Go to another player", [] { push_ring(R_PICK, P_TELEPORT); }, g_npl > 1, true));
+        // Teleport is on hold for release 1 (it does not move the player yet, docs/online-ui.md "Teleport"): the slice
+        // shows only with net_teleport = 1.
+        if (cfg_bool("TOTK_NET_TELEPORT"))
+            v.push_back(mk("Teleport", IC_PIN, "Go to another player", [] { push_ring(R_PICK, P_TELEPORT); }, g_npl > 1, true));
         v.push_back(mk("Chat", IC_CHAT, "Open the chat box", [] { online_chat_open(NET_CHAT_ALL, ""); }));
         v.push_back(mk("Team", IC_TEAM, "Create, invite, leave", [] { push_ring(R_TEAM); }, true, true));
         if (is_staff()) v.push_back(mk("Host", IC_CROWN, "Host and moderator tools", [] { push_ring(R_HOST); }, true, true));
