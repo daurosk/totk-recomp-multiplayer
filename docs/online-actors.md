@@ -11,7 +11,7 @@ to the owner and counts there; life travels in the owner's states, so it is equa
 |---|---|---|
 | Sync core: roles, epochs, offers, states, copies, hits, gone, spawn rule, wildlife leader rule | `runtime/net/net_actors.c`, `.h` | done, offline lab passes |
 | Offline lab: two invented games and a stub server, every message through the real codec | `tests/net_actors_lab.c`, `tests/net_actors_check.py` | 38 checks, built optimised and with UB traps |
-| Game side: `NaGame` over the recompiled game (scan, make a copy, drive, AI off, hit, removal) | `runtime/net_actors_game.c` | **not started** |
+| Game side: `NaGame` over the recompiled game (scan, make a copy, drive, AI off, hit, removal) | `runtime/net_actors_game.c` | **scan only** (`na_game_scan`, read-only, 1.2.1); `na_game()` is NULL until copies can be made, driven and removed |
 | Hook into `net_client.c`: offer `OW_FEAT_ACTORS`, queue 0x04xx frames for the frame step, send the core's messages | `runtime/net/net_client.c` | **not started**: waits for the game side, so the feature is never offered without it |
 
 ## The core
@@ -52,6 +52,35 @@ class `item` yet. `take` and `taken` are the server's (first take wins) and not 
 1. Every name hash is FNV-1a 32 of the UTF-8 name (`ow_name_hash`).
 2. `herd.cell` is `ow_herd_cell(x, z)`, the 250 m grid: the game side passes it to `na_set_place`.
 3. The creator owns a spawn at epoch 1 and gets no `owner` for it.
+
+## Probed on main (1.2.1, 2026-11-08)
+
+Five read-only rounds of `build121	otk.exe` (TOTK_TEST_WINDOW slot 0, the profile's first save, the player near
+(-114, 128, 186)), read from outside with ReadProcessMemory: guest addresses are host addresses, so a reader opened with
+read rights alone sees the guest. The probe scripts are kept with the hand-over notes, not in the repo.
+
+- The process manager is `[main+0x4722268]` (the same heap address, 0x1558c8300, in all five loads; `[main+0x4722260]`
+  points 0x40 below its list table). Found from the player: 140 to 153 guest words hold the player actor's address; the
+  ones at +0x10 of a node of a circular list lead to list heads, and the only main global that reaches them is this one.
+- `[manager+0x2d0]` points at 32 circular list heads 0x18 apart (a node's next at +0, its actor at +0x10; an empty head
+  points at itself). They come in four groups of eight; head 8 holds most actors (about 150, the player at its node
+  player+0x4d0), heads 3, 11, 19 and 27 about 112 objects, heads 4, 12, 20, 28 areas and event actors, the rest system
+  procs (`Chm_*`, `PhysicsSystemBaseProc`). The 33rd slot after the table is not a list of actors. Walking all 32 and
+  keeping each actor once gives 183 to 205 named actors here.
+- `manager+0x2d8` is a list of 556 to 576 nodes with its count at `manager+0x2e8`, but its nodes are other objects (one
+  vtable for all) and none points at an actor: not the actor list.
+- Actor: name at `[+0x18]` and at `[+0x218]` (both on every actor seen), state at +0x24 (4 on all 186 running ones),
+  position at +0x2b4 (it matches the player chain of `runtime/frame_rate.c`).
+- Map instance id: the u64 at `[[actor+0x370]+0x88]`. Two loads of the same save: 102 and 101 actors with one, 101 ids
+  in both, each on an actor of the same name, no id twice. It is 0 or missing on run-time actors (`Chm_*`, worn
+  armour, held weapons, `CombinedActorIntegrator`). Placed trees, rocks, crates (`Kibako`), barrels, `TwnObj`, `FldObj`,
+  `AsbObj` and enemies have one.
+- Not found in the actor's first 0x800 bytes: a field that is equal across loads and unique per actor (only the
+  transform), which is why the id is behind +0x370.
+
+Still to probe, in order: life (the scan reports `life_max` 0 until then), rotation (the scan sends identity), the
+auto-placement mark (old notes: bit 24 of actor+0x5ac), sleeping objects (whether a placed object far from the player is
+in any of the 32 lists), the game's removal, the damage entry, creating an actor by name, the AI switch for copies.
 
 ## Next: the game side
 
