@@ -546,8 +546,8 @@ int main(int argc, char **argv) {
     for (;;) {
         int r;
         while ((r = sv_lines_get(line, sizeof line)) == 1)
-            if (run_command(line)) return 0;
-        if (r < 0) return 0;
+            if (run_command(line)) break;
+        if (r != 0) break;
         size_t n = 0;
         uint64_t now = sv_now_us();
         for (int i = 0; i < BOTS; i++) {
@@ -565,4 +565,7 @@ int main(int argc, char **argv) {
         for (size_t i = 0; i < n; i++)
             if (sv_poll_readable(&fds[i])) bot_read(who[i]);
     }
+    /* as in the server's main: the stdin thread may hold the stream's lock, which exit() would wait for */
+    fflush(stdout);
+    _Exit(0);
 }

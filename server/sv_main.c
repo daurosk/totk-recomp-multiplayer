@@ -82,5 +82,8 @@ int main(int argc, char **argv) {
     sv_log("stopping");
     sv_room_stop();
     sv_store_close();
-    return 0;
+    /* The console thread may still be inside fgets on stdin, holding its lock; exit() would wait for that lock to
+     * flush the streams (glibc does), so leave without it. Everything worth keeping is already written. */
+    fflush(stdout);
+    _Exit(0);
 }
