@@ -125,6 +125,24 @@ mounted, climbing, cutscene, dead and shrine still need the player's state); the
 `TOTK_TELEPORT_SHOTS` (before and after pictures), `TOTK_TELEPORT_WATCH=<hex>` or `=b<hex>` (writers of an actor or
 body field, logged as executable offsets for `build/<ver>/totk.map`), `TOTK_TELEPORT_VT=1` (handle vtable dump).
 
+Player state, second round (1.2.1, `TOTK_TELEPORT_DUMP`, one run each, not yet used by the code):
+
+- The velocity reset through the world's vtable `+0x1d0` faults on its first call (access violation in `main+0x151ab4`
+  under the actor update), so it is off unless `TOTK_TELEPORT_ZEROVEL` is set. Without it a held hop still releases
+  and lands; the body leaves the hold already falling at about 10 m/s.
+- Menu or pause: the player's set-transform stops being called while the pause menu is open (the hook counts the calls
+  for the player actor), so "no calls for a few presents" is the pause signal.
+- Dead: a 400 m drop ends in Game Over. Fields that change only then: `[[actor+0x600]+0x128]` 0 to 5,
+  `[[actor+0x870]+0x230]` and `[[actor+0xab8]+0x30]` 0 to 1.
+- Falling: `[[actor+0xd70]+0x420]` is 0x460 standing and gliding and 0x400 falling and dead.
+- Gliding: no field of the actor or of the objects one pointer away tells it apart from standing; the state machine
+  sits deeper. The paraglider sinks 3.3 m/s; a fall tops out at 60 m/s.
+- No object the actor points to names its state in a string.
+
+Debug tools added: `TOTK_TELEPORT_DUMP=<dir>` saves the actor and the objects it points to every 15 presents as
+`<world ms>.bin`, the strings those objects lead to and the update count as `<world ms>.txt`, and a picture every
+150 presents; `TOTK_TELEPORT_TEST` steps written `t<ms>` run at that time of the world clock.
+
 ## Settings
 
 Section `[online]` of `totk.ini` ([totk.ini.example](../totk.ini.example)): `net_name`, `net_address`,

@@ -138,6 +138,8 @@ static void watch_report(void) {
 static uint64_t g_hook_actor;   // __atomic builtins: written on the present thread, read by the guest
 static float g_hook_pos[3];
 static int g_hook_hits;
+static uint64_t g_player_seen;   // the player actor of the last present
+static int g_hook_calls;         // set-transform calls for the player: its update ran
 
 static uint64_t read_p(uint64_t a) {
     uint64_t p = 0;
@@ -171,7 +173,7 @@ static void push_body(Cpu *c, uint64_t body, const float pos[3]) {
     rt_call(c, MOD_MAIN_BASE + BODY_SET_TRANSFORM, 3, handle, c->sp, body);
     uint64_t world = body_world(body), id = 0, get_vel = world ? read_p(read_p(world) + WORLD_LINEAR_VELOCITY) : 0;
     plat_mem_read(handle + 8, &id, 4);
-    if (get_vel) {
+    if (get_vel && cfg_get("TOTK_TELEPORT_ZEROVEL")) {
         uint64_t v = rt_call(c, get_vel, 2, world, id);
         if (v >= 0x10000) memset((void *)(uintptr_t)v, 0, 12);
     }
@@ -184,6 +186,7 @@ static void push_body(Cpu *c, uint64_t body, const float pos[3]) {
 
 static void set_transform_hook(Cpu *c) {
     c->x[1] = c->x[26];
+    if (c->x[0] && c->x[0] == __atomic_load_n(&g_player_seen, __ATOMIC_RELAXED)) __atomic_add_fetch(&g_hook_calls, 1, __ATOMIC_RELAXED);
     uint64_t want = __atomic_load_n(&g_hook_actor, __ATOMIC_ACQUIRE);
     if (!want || c->x[0] != want || !c->x[26]) return;
     uint64_t body = player_body(want);
@@ -265,8 +268,66 @@ int teleport_to(const float xyz[3]) {
 
 int teleport_busy(void) { return g_active; }
 
+// TOTK_TELEPORT_DUMP=<dir>: every DUMP_EVERY presents in the world, saves the player actor's first 0x2000 bytes and
+// 0x800 bytes of each object an 8-aligned pointer in them leads to as <dir>/<world ms>.bin, to find the fields that
+// tell the player's states apart (tools: compare the files of known states). Read only.
+#define DUMP_EVERY 15
+static char g_dump_shot[600];   // a picture to save at this present, for the dump's timeline
+static void dump_actor(uint64_t a) {
+    static const char *dir;
+    static int n;
+    if (!dir) dir = cfg_get("TOTK_TELEPORT_DUMP");
+    if (!dir || !*dir || ++n % DUMP_EVERY) return;
+    int64_t w = frame_step_world_us();
+    char path[600];
+    snprintf(path, sizeof path, "%s/%010lld.bin", dir, (long long)(w / 1000));
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    static uint8_t blk[0x2000], sub[0x800];
+    if (!plat_mem_read(a, blk, sizeof blk)) memset(blk, 0, sizeof blk);
+    fwrite(&a, 8, 1, f);
+    fwrite(blk, 1, sizeof blk, f);
+    for (uint32_t off = 0; off < sizeof blk; off += 8) {
+        uint64_t p;
+        memcpy(&p, blk + off, 8);
+        if (p < 0x100000 || p > 0x7fffffffffffull || !plat_mem_read(p, sub, sizeof sub)) continue;
+        fwrite(&off, 4, 1, f);
+        fwrite(&p, 8, 1, f);
+        fwrite(sub, 1, sizeof sub, f);
+    }
+    fclose(f);
+    // the strings the pointers in each of those objects lead to (names of states, resources), and the update count
+    snprintf(path, sizeof path, "%s/%010lld.txt", dir, (long long)(w / 1000));
+    f = fopen(path, "w");
+    if (!f) return;
+    float pos[3] = {0};
+    plat_mem_read(a + POS_OFF, pos, 12);
+    fprintf(f, "calls %d pos %.2f %.2f %.2f\n", __atomic_load_n(&g_hook_calls, __ATOMIC_RELAXED), pos[0], pos[1], pos[2]);
+    for (uint32_t off = 0; off < sizeof blk; off += 8) {
+        uint64_t p;
+        memcpy(&p, blk + off, 8);
+        if (p < 0x100000 || p > 0x7fffffffffffull || !plat_mem_read(p, sub, sizeof sub)) continue;
+        for (uint32_t o2 = 0; o2 < sizeof sub; o2 += 8) {
+            uint64_t q;
+            char str[49] = {0};
+            memcpy(&q, sub + o2, 8);
+            if (q < 0x100000 || q > 0x7fffffffffffull || !plat_mem_read(q, str, 48)) continue;
+            int k = 0;
+            while (k < 48 && str[k] >= 32 && str[k] < 127) k++;
+            if (k >= 4 && (k == 48 || !str[k])) fprintf(f, "%x %x %s\n", off, o2, str);
+        }
+    }
+    fclose(f);
+    if (n % (DUMP_EVERY * 10) == 0) snprintf(g_dump_shot, sizeof g_dump_shot, "%s/%010lld.png", dir, (long long)(w / 1000));
+}
+
 void teleport_frame(void) {
     if (g_watch_left && !--g_watch_left) watch_report();
+    {
+        uint64_t a = frame_step_player_actor();
+        __atomic_store_n(&g_player_seen, a, __ATOMIC_RELAXED);
+        if (a && frame_step_world_us() >= 0) dump_actor(a);
+    }
     if (!g_active) return;
     uint64_t a = frame_step_player_actor();
     if (!a || !plat_mem_readable(a + POS_OFF, 12)) {
@@ -325,7 +386,9 @@ static void test_parse(void) {
     const char *p = cfg_get("TOTK_TELEPORT_TEST");
     while (p && *p && g_test_n < 16) {
         char *e;
-        int w = (int)strtol(p, &e, 10);
+        int timed = *p == 't';   // "t<ms>": at that time of the world clock instead of a wait in presents
+        int w = (int)strtol(p + timed, &e, 10);
+        if (timed) w = -w;
         if (e == p) break;
         p = e;
         while (*p == ' ') p++;
@@ -342,6 +405,12 @@ static void test_parse(void) {
 }
 
 const char *teleport_test_shot(void) {
+    static char shot[600];
+    if (g_dump_shot[0]) {
+        memcpy(shot, g_dump_shot, sizeof shot);
+        g_dump_shot[0] = 0;
+        return shot;
+    }
     if (g_test_n < 0) test_parse();
     if (!g_test_n) return NULL;
     const char *dir = cfg_get("TOTK_TELEPORT_SHOTS");
@@ -353,7 +422,8 @@ const char *teleport_test_shot(void) {
         return g_shot;
     }
     if (g_test_after || g_test_i >= g_test_n) return NULL;
-    if (++g_test_wait < g_test[g_test_i].wait) return NULL;
+    if (g_test[g_test_i].wait < 0 ? frame_step_world_us() / 1000 < -g_test[g_test_i].wait : ++g_test_wait < g_test[g_test_i].wait)
+        return NULL;
     g_test_wait = 0;
     float to[3];
     for (int k = 0; k < 3; k++) to[k] = g_test[g_test_i].abs ? g_test[g_test_i].v[k] : now[k] + g_test[g_test_i].v[k];
