@@ -102,6 +102,7 @@
 
  "warn.lang_needs_fonts": "Textos em {lang} precisam das fontes de sistema do Switch, e nenhuma foi informada. O jogo não inicia neste idioma até que sejam adicionadas. Escolha a pasta do firmware (Contents/registered) ou veja \"Switch system fonts\" em docs/installer.md.",
  "warn.cheats_skipped": "Não foi possível compilar os cheats da pasta de mods que alteram o código do jogo; o jogo é instalado sem eles. Detalhes: {log}",
+ "warn.updater_not_copied": "Não foi possível copiar o atualizador do jogo para {path}; o jogo inicia sem o novo até a instalação ser executada de novo. ({detail})",
  "warn.exefs_skipped": "Não foi possível compilar os patches ExeFS dos mods (.ips, .pchtxt); o jogo é instalado sem eles. Detalhes: {log}",
  "warn.npdm_differs": "O main.npdm difere do dump de referência da versão {version}; só os módulos de código são usados.",
  "warn.xbox_prompts_failed": "Não foi possível preparar os ícones de botão do Xbox ou do PC (código de saída {code}); o jogo mantém os ícones do Switch. Detalhes: {log}",
