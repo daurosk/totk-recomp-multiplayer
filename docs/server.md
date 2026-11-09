@@ -2,7 +2,8 @@
 
 The server is one small program, `totk-server`, that runs on Windows or Linux. Players' games connect to it over
 TCP. Release 1 carries the core of online play: the player list, chat, teams, teleport requests, the host's tools
-and the positions behind the map and teleports. There is no shared world and no other players' bodies yet.
+and the positions behind the map and teleports. With a game that has it, the server also runs the actors add-on:
+shared enemies, objects and items, each run by one game at a time ([online-wire.md](online-wire.md) 9.1).
 
 It needs no game files and no account anywhere. It keeps everything in one data folder next to it.
 
@@ -12,7 +13,7 @@ It needs no game files and no account anywhere. It keeps everything in one data 
 | Protocol | [online-wire.md](online-wire.md) |
 | Test bot | `tools/net_bot.c` |
 | Download | `TotKMP-Server-<version>-windows.zip` or `-linux.tar.gz` ([releasing.md](releasing.md)): the server, a start script, `server-data/server.toml` and this file as its README |
-| Tests | `tests/net_server_check.py` ([building.md](building.md), "Checks") |
+| Tests | `tests/net_server_check.py`, `tests/actor_lab.py`, `tests/actor_server_check.py` ([building.md](building.md), "Checks") |
 
 ## Build
 
@@ -38,7 +39,7 @@ python3 tools/build_server.py
 **By hand**, without the script (Linux; on Windows add `-lws2_32 -lbcrypt` and drop `-pthread` and the `-D` flags):
 
 ```bash
-cc -std=c11 -O2 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -pthread -I online/proto server/sv_*.c online/proto/*.c online/third_party/monocypher/*.c -o totk-server
+cc -std=c11 -O2 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -pthread -I online/proto server/sv_*.c online/proto/*.c online/third_party/monocypher/*.c -o totk-server -lm
 ```
 
 ## Run

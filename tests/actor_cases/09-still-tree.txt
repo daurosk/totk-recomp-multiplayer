@@ -1,0 +1,18 @@
+case still-tree Things that stay where they are keep their owner (s1.still): a fruit tree stays; a rock that rolls goes to the player it rolls to
+player A
+player B
+actor Tree 0:701 Obj_TreeApple_A 0,0,0
+actor Rock 0:702 Obj_Rock_Small_A 1,0,0
+walk A 0 1 30,0,0 30,0,0
+walk A 10 20 30,0,0 60,0,0
+walk B 0 1 -80,0,0 -80,0,0
+walk B 20 30 -80,0,0 -5,0,0
+walk Rock 40 46 1,0,0 -4,0,0
+at 0 A join
+at 0 B join
+run 70
+expect owner Tree at 69 is A
+expect kept still >= 10
+expect owner Rock at 39 is A
+expect owner Rock at 69 is B
+expect cause Rock closer == 1

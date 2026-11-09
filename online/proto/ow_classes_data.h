@@ -19,7 +19,8 @@
     "#   comps     The components its states carry, from anim life gear mind ride glide aim held scale, joined by\n" \
     "#             commas; - for none.\n" \
     "#   rules     Owner rules beyond the common ones, joined by commas; - for none:\n" \
-    "#               still        keeps its owner while it has not moved 1 m in 5 s (rule 5)\n" \
+    "#               still        does not act by itself, so rule 2 waits too while it lies still (rule 5); items, world\n" \
+    "#                            and map objects and devices count so without the word\n" \
     "#               fight        stays with its owner while it was hit in the last 10 s (rule 7)\n" \
     "#               lock         a boss: stays with its owner while a player is near (rule 7)\n" \
     "#               part=P|Q     follows the nearest record within 60 m whose name starts with P or Q (rule 8)\n" \

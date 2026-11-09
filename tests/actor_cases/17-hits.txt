@@ -1,0 +1,20 @@
+case hits Hits on a copy reach its owner; a stale epoch, a far hitter and the owner's own hits are dropped; a flood is capped at 120 in 5 s (ws3 damage forwarding)
+player A
+player B
+player C
+actor Boko 0:1701 Enemy_Bokoblin_Junior 0,0,0
+walk A 0 1 10,0,0 10,0,0
+walk B 0 1 -5,0,0 -5,0,0
+walk C 0 1 0,0,100 0,0,100
+at 0 A join
+at 0 B join
+at 0 C join
+at 5 B hit Boko n=3
+at 6 B hit Boko stale
+at 7 C hit Boko
+at 8 A hit Boko
+at 20 B hit Boko n=200
+run 30
+expect got A hit_in Boko == 123
+expect got B hit_in == 0
+expect owner Boko at 29 is A

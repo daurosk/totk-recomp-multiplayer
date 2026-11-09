@@ -1,0 +1,19 @@
+case release-unload An owner that releases or unloads an actor hands it to a near candidate at once, or to nobody
+player A manual
+player B
+actor Pot 0:2101 Obj_Pot_A 0,0,0
+actor Jar 0:2102 Obj_Jar_A 2,0,0
+walk A 0 1 5,0,0 5,0,0
+walk B 0 1 -40,0,0 -40,0,0
+at 0 A join
+at 0 B join
+at 0 A offer Pot
+at 0 A offer Jar
+at 5 A release Pot
+at 10 A unload Jar
+run 60
+expect owner Pot at 4 is A
+expect owner Pot at 5.5 is B
+expect owner Jar at 10.5 is B
+expect cause Pot left == 1
+expect cause Jar left == 1

@@ -25,7 +25,7 @@ enum { OW_IDS_MAP = 1, OW_IDS_CREATOR = 2, OW_IDS_LEADER = 4 };
 
 /* A row's owner rules (bits of ow_class_row.rules); docs/online-wire.md numbers the rules they change. */
 enum {
-    OW_CR_STILL = 1 << 0,
+    OW_CR_STILL = 1 << 0, /* does not act by itself: rule 5 holds rule 2 for it too */
     OW_CR_FIGHT = 1 << 1,
     OW_CR_LOCK = 1 << 2,
     OW_CR_PART = 1 << 3,

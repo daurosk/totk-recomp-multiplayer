@@ -1,0 +1,20 @@
+case orphans-loading After a loading screen the camp went to the first game that offered, at any distance (S1 orphans)
+# The owner loads for 40 s. The other player is 140 m away: it has the camp loaded but is beyond 120 m, so the camp
+# stays with the loading owner until the other player comes near, and then moves by "owner left".
+player A
+player B
+actor Boko1 0:501 Enemy_Bokoblin_Junior 0,0,0
+actor Boko2 0:502 Enemy_Bokoblin_Junior 4,0,3
+walk A 0 1 40,0,0 40,0,0
+walk B 0 1 -140,0,0 -140,0,0
+walk B 50 60 -140,0,0 -60,0,0
+at 0 A join
+at 0 B join
+at 30 A area loading
+at 70 A area playing
+run 120
+expect owner Boko1 at 45 is A
+expect kept orphan_far >= 10
+expect owner Boko1 at 62 is B
+expect cause Boko1 left == 1
+expect changes all in 65..120 == 0

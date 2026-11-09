@@ -1,0 +1,30 @@
+case closer-forest-walk Gate run 46f2ee15 (2026-11-05, forest-walk): a rock changed owner every 12 s with one player 20 to 22 m away and the other 10 to 15 m
+# Rule 3 wants the candidate at most half the owner's distance away and 15 m nearer, 20 s after the last change.
+player A
+player B
+actor Rock 0:12 AsbObj_RockParts_C_S_01 0,0,0
+walk A 0 4 21,0,0 21,0,0
+walk A 4 16 21,0,0 20.2,0,3
+walk A 16 28 20.2,0,3 22.2,0,-2
+walk A 28 40 22.2,0,-2 20.5,0,0
+walk A 40 52 20.5,0,0 22,0,2
+walk A 52 64 22,0,2 20.3,0,-1
+walk A 64 76 20.3,0,-1 21.8,0,1
+walk A 76 88 21.8,0,1 20.4,0,0
+walk A 88 100 20.4,0,0 22.2,0,0
+walk A 100 112 22.2,0,0 20.2,0,0
+walk B 0 5 -60,0,0 -15,0,0
+walk B 5 17 -15,0,0 -10,0,3
+walk B 17 29 -10,0,3 -14,0,-3
+walk B 29 41 -14,0,-3 -10,0,1
+walk B 41 53 -10,0,1 -15,0,0
+walk B 53 65 -15,0,0 -10,0,-2
+walk B 65 77 -10,0,-2 -13,0,2
+walk B 77 89 -13,0,2 -10,0,0
+walk B 89 101 -10,0,0 -15,0,1
+walk B 101 113 -15,0,1 -10,0,0
+at 0 A join
+at 0 B join
+run 125
+expect owner Rock at 2 is A
+expect changes Rock in 2..125 == 0
