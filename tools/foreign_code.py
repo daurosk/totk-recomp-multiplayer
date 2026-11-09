@@ -16,8 +16,9 @@ Standard library only. Used by tools/check_content.py; tests/foreign_code_check.
 import hashlib
 import re
 
-# Files that may name another project to credit it: the README says what inspired this one. Code never may.
-CREDIT_FILES = {"README.md"}
+# Files that may name another project to credit it: the README and the release notes say what inspired this one.
+# A name ending in "/" is a folder. Code never may.
+CREDIT_FILES = {"README.md", "release-notes/"}
 
 # length of normalized text -> digests
 SUBSTRING_DIGESTS = {

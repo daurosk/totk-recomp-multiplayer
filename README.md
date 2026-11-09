@@ -58,9 +58,9 @@ No multiplayer release is out yet. Until then, install TotK Recomp from [its rel
 
 Requirements: Windows 10 or later, an x86-64 CPU with SSE4.2 (AVX2/FMA machines get a faster build), a GPU with Vulkan 1.3 and `VK_EXT_external_memory_host`, about 36 GiB free during setup (20 GiB after).
 
-1. Download `TotK-Setup-<version>-windows.zip` from [Releases](../../releases/latest) and unpack it.
-2. Start `TotK-Setup.exe`. If SmartScreen warns about an unsigned app, choose *More info*, then *Run anyway*.
-3. Pick your game files, the language and an install folder, and press *Start*. The setup builds the game once. With
+1. Download `TotKMP-Setup-<version>-windows.zip` from [Releases](../../releases/latest) and unpack it.
+2. Start `TotKMP-Setup.exe`. If SmartScreen warns about an unsigned app, choose *More info*, then *Run anyway*.
+3. Pick your game files, the language and an install folder (it starts at a new `TotK Recomp Multiplayer` folder; an existing TotK Recomp install is never touched), optionally the address of a server to join, and press *Start*. The setup builds the game once. With
    an NVIDIA RTX GPU it also downloads NVIDIA DLSS, unless you untick *Download NVIDIA DLSS*; turn DLSS on in the
    menu (F1).
 4. Play `totk.exe` from the install folder.
@@ -69,8 +69,8 @@ Requirements: Windows 10 or later, an x86-64 CPU with SSE4.2 (AVX2/FMA machines 
 
 Requirements: as on Windows, plus Linux 6.7 or later and glibc 2.34 or later (Ubuntu 22.04, Debian 12, Fedora 35, SteamOS 3).
 
-1. Download `TotK-Setup-x86_64.AppImage` from [Releases](../../releases/latest), or build it ([docs/installer.md](docs/installer.md), "Linux release").
-2. Make it executable (`chmod +x TotK-Setup-x86_64.AppImage`) and start it. On a Steam Deck, do this in Desktop Mode.
+1. Download `TotKMP-Setup-<version>-x86_64.AppImage` from [Releases](../../releases/latest), or build it ([docs/installer.md](docs/installer.md), "Linux release").
+2. Make it executable (`chmod +x TotKMP-Setup-<version>-x86_64.AppImage`) and start it. On a Steam Deck, do this in Desktop Mode.
 3. Pick your game files, the language and an install folder, and press *Start*.
 4. Play `totk` from the install folder.
 

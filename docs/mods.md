@@ -65,7 +65,7 @@ ahead of time, so these patches are built into `totk.exe`:
 3. After the rebuild the mod switches on and off from the Mods tab like any other, without another rebuild.
 
 The rebuild needs the setup folder the game was installed from. When that folder was moved or deleted, run
-`TotK-Setup.exe` again on the same install folder: it does the same job. `mods_rebuild = off` under `[mods]` in
+`TotKMP-Setup.exe` again on the same install folder: it does the same job. `mods_rebuild = off` under `[mods]` in
 `totk.ini` turns the automatic rebuild off.
 
 A code patch over one of the port's own patches (the 60 FPS patch, the resolution patch and the other entries under

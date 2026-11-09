@@ -1,20 +1,21 @@
 # Installer
 
-A public release that turns the player's own game files into a playable TotK folder. The release carries no game
+TotK Recomp Multiplayer's setup (its name, folder and version are described in [releasing.md](releasing.md)): a public release that turns the player's own game files into a playable TotK folder. The release carries no game
 data and no code derived from the game: the installer builds the game on the player's machine. The installed folder
 holds only the game; the installer and its tools stay outside it.
 
 ## What the player does
 
-1. Downloads `TotK-Setup-<version>-windows.zip` from GitHub Releases (none is published yet), unpacks it anywhere and
-   starts `TotK-Setup.exe`.
+1. Downloads `TotKMP-Setup-<version>-windows.zip` from GitHub Releases (none is published yet; [releasing.md](releasing.md)), unpacks it anywhere and
+   starts `TotKMP-Setup.exe`.
 2. Picks:
    - the base game (XCI or NSP) and the 1.1.0, 1.2.1 or 1.4.3 update (NSP); an NSZ or XCZ (compressed by the nsz
      tool) works as it is, the setup unpacks it itself;
    - their `prod.keys`;
    - optionally the firmware folder (`system/Contents/registered` of an unpacked firmware or an emulator's install),
      needed for Chinese, Korean and Traditional Chinese text;
-   - the game language and the install folder.
+   - the game language and the install folder (it starts at `TotK Recomp Multiplayer` in the home folder, never at a TotK Recomp install);
+   - optionally the "Server address" (`host:port`): the last step writes it to `totk.ini` as `[online] net_address`, with `net_autoconnect = 1`, so the game connects at start (`--server HOST:PORT` on the command line).
 3. Waits for the setup, one time. The window shows each step and its progress.
 4. Plays `totk.exe` from the install folder. The installer and the source NSP or XCI (or NSZ, XCZ) can be deleted.
 
@@ -40,7 +41,8 @@ The player runs a newer installer on the same folder. It reads `totk-install.jso
 `shared-fonts/`, `profile/` and `totk.ini` after checking their hashes, rebuilds `totk.exe` and re-prepares the
 shaders. A newer release that changes nothing game-derived skips the rebuild. The window starts with the last install folder
 and the base, update, keys and firmware paths it ran with (paths only, never the keys file's contents), kept in
-`%LOCALAPPDATA%\TotK Recomp\setup.json` (`$XDG_STATE_HOME/totk-recomp/setup.json` elsewhere). Entries that no longer exist
+`%LOCALAPPDATA%\TotK Recomp Multiplayer\setup.json` (`$XDG_STATE_HOME/totk-recomp-multiplayer/setup.json` elsewhere; an
+install of TotK Recomp itself keeps its own file). Entries that no longer exist
 stay empty. A reinstall or a switch to another game version starts filled in.
 
 Given an update file other than the recorded one (1.1.0, then 1.2.1, then 1.4.3), the installer extracts and builds again from it
@@ -148,7 +150,7 @@ python -m installer --base FILE --update FILE --keys FILE --lang CODE --dest DIR
 The unpacked release; `tools/make_release.py` assembles it and `--zip` packs it:
 
 ```
-TotK-Setup.exe        starts python/pythonw.exe -m installer.gui (installer/launcher/launcher.c, no console)
+TotKMP-Setup.exe        starts python/pythonw.exe -m installer.gui (installer/launcher/launcher.c, no console)
 installer/            the installer: steps, CLI, window, en/ru/zh-Hans text catalog
 python/               Python 3.14.9 embeddable + numpy, lz4, cryptography, cffi, pycparser (+ tkinter for the window)
 recomp/, tools/       the lifter and the build, extraction and shader scripts the steps run (copied from the repo)
@@ -159,7 +161,7 @@ bin/                  totk_xlate.exe, hactool.exe, SDL3.dll, libopus-0.dll, ninj
 data/                 shader_list.tsv (MacNativeGames, MIT); pgo-<ver>.profdata + .json, the execution profile an
                       update's code and the runtime libraries compile with (building.md, "Profile-guided build")
 THIRD_PARTY_NOTICES.md
-totk.ini.example, VERSION  the default ini; the release string (the repository's VERSION plus the commit)
+totk.ini.example, VERSION, MP_VERSION  the default ini; the release string (VERSION, the TotK Recomp release, plus the commit) and our own version
 ```
 
 - SDL3 comes from the upstream release, not MSYS2: MSYS2's DLL imports the LGPL libiconv.
@@ -181,7 +183,7 @@ nn::pl shared fonts). The game does not ship them. Without them it exits before 
 
 ## Linux release
 
-`tools/make_release_linux.py` builds the same setup for Linux and packs it as `TotK-Setup-x86_64.AppImage` (the static
+`tools/make_release_linux.py` builds the same setup for Linux and packs it as `TotKMP-Setup-<version>-x86_64.AppImage` (the static
 type-2 runtime: no libfuse2 needed on the host). The player makes it executable and starts it; on a Steam Deck, from
 Desktop Mode. The command-line setup needs the desktop session's display (`DISPLAY` or `WAYLAND_DISPLAY`) because preparing the
 shaders opens a window; the check step fails at once without it. Building the release also needs `make` and `pkg-config`. The bundled Tcl/Tk 9.0.4 is rebuilt with
@@ -247,3 +249,12 @@ bin/                  totk_xlate, hactool, ninja, libSDL3.so.0
 - Re-warm the driver cache on start after a move, GPU or driver change.
 - Per-monitor DPI in the setup window: Tk 9 has none, so a display whose scale differs from the primary one still gets
   the window stretched.
+
+## Multiplayer additions
+
+- `MP_VERSION` is this project's own version; `VERSION` stays the TotK Recomp release it is built on. `installer/layout.py`
+  (`version_text`, `product_line`) reads both: the window shows `TotK Recomp Multiplayer Setup`, `0.1.0 (TotK Recomp 0.3.13)`.
+- `totk-install.json` records `"product": "totk-recomp-multiplayer"`. The check step stops with `check.dest_other_install`
+  on a folder whose state names no product (an install of TotK Recomp itself) before it writes anything.
+- The game the setup builds contains the multiplayer client: `tools/build_game.py` compiles `runtime/net/*.c` and
+  `runtime/ui/*.cpp` (the `online_*` files among them), and online play is on when `net_address` is set.

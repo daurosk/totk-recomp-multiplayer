@@ -138,6 +138,7 @@ class Form:
     lang: str = ''
     dest: str = ''
     dlss: bool = False
+    server: str = ''
 
     def installed_state(self):
         """The recorded state of the install folder (totk-install.json), or None. Never raises."""
@@ -174,6 +175,8 @@ class Form:
                     found.append(f'ui.missing_{name}')
         if self.firmware.strip() and not Path(self.firmware.strip()).is_dir():
             found.append('ui.missing_firmware')
+        if self.server.strip() and not ini.valid_address(self.server):
+            found.append('ui.bad_server')
         return found
 
     def command(self, python, root=None, temp=None, verify_hashes=False):
@@ -190,6 +193,8 @@ class Form:
             cmd.append('--verify')
         if self.dlss:
             cmd.append('--dlss')
+        if self.server.strip():
+            cmd += ['--server', self.server.strip()]
         return cmd
 
 

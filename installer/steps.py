@@ -36,7 +36,7 @@ import urllib.request
 from pathlib import Path
 
 from . import ini
-from .layout import EXE, SUPPORTED, version_tag
+from .layout import EXE, PRODUCT, SUPPORTED, version_tag
 from .runner import InstallError, Step
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tools'))
@@ -353,6 +353,9 @@ class Check(Step):
             raise InstallError('check.release_incomplete', paths=missing[:5])
         if dest.exists() and not dest.is_dir():
             raise InstallError('check.dest_not_folder', path=str(dest))
+        # An earlier TotK Recomp install has the same totk-install.json without our product name: leave it as it is
+        if ctx.mode != 'install' and ctx.state.get('product') != PRODUCT:
+            raise InstallError('check.dest_other_install', path=str(dest))
         own = (ctx.temp, *ctx.temp.parents)   # a temp folder inside the install folder (installer/cli.py) is ours
         if ctx.mode == 'install' and dest.is_dir() and any(p not in own for p in dest.iterdir()):
             raise InstallError('check.dest_not_empty', path=str(dest))
@@ -1231,7 +1234,7 @@ class Cleanup(Step):
         rep, dest = ctx.reporter, ctx.dest
         rep.progress('cleanup', 'ini', force=True)
         try:
-            ini.write(dest, ctx.lang, ctx.layout.ini_example)
+            ini.write(dest, ctx.lang, ctx.layout.ini_example, getattr(getattr(ctx, 'options', None), 'server', None))
         except OSError as e:
             raise InstallError('cleanup.ini_failed', detail=str(e)) from None
         ctx.state['lang'] = ctx.lang
