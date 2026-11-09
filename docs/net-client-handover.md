@@ -28,6 +28,10 @@ State of branch `net-client` (main 10807fa merged in). Remove this file when the
 
 ## Not done
 
+- Teleport is on hold for release 1 (another session hides the teleport slice behind a setting in
+  `runtime/ui/online_wheel.cpp`; this branch does not touch that file). The PR body should not present teleports as
+  part of release 1; the teleport results above are only a record of that round.
+
 - The PR is not opened (the session reached its context limit). Open it with
   `gh pr create --repo daurosk/totk-recomp-multiplayer --base main --head net-client` and a plain title such as
   "Connect the online UI to the real server". The body says what changed (the points above) and how it was tested;
