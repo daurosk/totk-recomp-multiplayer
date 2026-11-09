@@ -4,8 +4,6 @@
 
 This project builds on valentderah's recomp: the recompiler, runtime, renderer and installer are his work ([docs/architecture.md](docs/architecture.md)). The build follows his releases. Each time TotK Recomp releases a new version, it is merged here and a matching multiplayer build follows. [UPSTREAM](UPSTREAM) names the TotK Recomp release this tree is on.
 
-The idea of playing Tears of the Kingdom together comes from Kirbymimi's TOTK Online mod, which brought online play to the game on Switch and emulators. TotK Recomp Multiplayer is inspired by that work but is a different project: it targets the recomp, not an emulator, and every line of its code is written for it from scratch. Nothing is copied from his mod, and the two are not compatible with each other.
-
 Join us on Discord: [dauro's co-op](https://discord.gg/GwtRKAqng5).
 
 > [!IMPORTANT]
@@ -78,7 +76,9 @@ To update, run a newer setup on the same folder; saves and settings are kept. Se
 
 ## Credits
 
-TotK Recomp Multiplayer is built on [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) by valentderah, and inspired by Kirbymimi's TOTK Online mod (no code taken from it). If you enjoy TotK Recomp, consider supporting him: [donationalerts.com/r/valentderah](https://www.donationalerts.com/r/valentderah).
+TotK Recomp Multiplayer is built on [TotK Recomp](https://github.com/valentderah/totk-pc-recomp) by valentderah. If you enjoy TotK Recomp, consider supporting him: [donationalerts.com/r/valentderah](https://www.donationalerts.com/r/valentderah).
+
+TotK Recomp Multiplayer is inspired by Kirbymimi's TOTK Online mod, but it is a fundamentally different project: it targets the recomp, not an emulator. Because of that mod's license, none of its code or assets is used here; everything is written from scratch for the recomp.
 
 TotK Recomp builds on the projects below. What was taken from each, with its license, is listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
