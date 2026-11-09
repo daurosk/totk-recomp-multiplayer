@@ -285,7 +285,10 @@
 # net_key_refuse = n
 # The controller buttons that open the wheel when held together, joined by +: a b x y lstick rstick l r zl zr plus minus
 # left up right down. The game does not see them while they are held. none turns the controller wheel off.
-# net_pad_wheel = minus+lstick
+# net_pad_wheel = down
+# A single button opens the wheel after being held this many milliseconds (0 to 2000); a shorter press still reaches the
+# game as that button's normal press. A chord of several buttons opens at once.
+# net_wheel_hold_ms = 350
 # The wheel's size in percent (60 to 150), the seconds the chat stays on screen after the last line (3 to 30) and the
 # lines it shows (4 to 30).
 # net_wheel_scale = 100
