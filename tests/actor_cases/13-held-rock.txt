@@ -1,0 +1,16 @@
+case held-rock A Bokoblin's rock flew toward the other player, whose game took it 3 m out and ran the rest of the flight (camp capture, s1.held)
+# The rock lands 3 m from player B, 19 m from the owner A: a pick-up by the common rules. As a held object within
+# 12 m of the enemy that threw it, it stays with that enemy's owner.
+player A
+player B
+actor Boko 0:1301 Enemy_Bokoblin_Junior 0,0,0
+actor Rock 0:1302 Obj_LiftRock_A 0,1,1
+walk Rock 20 21 0,1,1 -9,0,0
+walk A 0 1 10,0,0 10,0,0
+walk B 0 1 -12,0,0 -12,0,0
+at 0 A join
+at 0 B join
+run 50
+expect owner Rock at 49 is A
+expect changes Rock == 1
+expect owner Boko at 49 is A

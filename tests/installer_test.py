@@ -504,6 +504,15 @@ class CleanupTest(unittest.TestCase):
     def test_intact_romfs_passes(self):
         self.assertEqual(self.run_cleanup(), 'ok')
 
+    def test_copies_the_updater(self):
+        src = self.dest.parent / 'release-bin' / 'totk-update.exe'
+        src.parent.mkdir()
+        src.write_bytes(b'updater 2')
+        self.ctx.layout.updater = src
+        (self.dest / 'totk-update.exe').write_bytes(b'updater 1')
+        self.assertEqual(self.run_cleanup(), 'ok')
+        self.assertEqual((self.dest / 'totk-update.exe').read_bytes(), b'updater 2')
+
     def test_keeps_build_and_writes_rebuild_command(self):
         for name in ('gen', 'build', 'check'):
             (self.ctx.temp / name).mkdir()

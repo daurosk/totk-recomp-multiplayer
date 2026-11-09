@@ -50,7 +50,8 @@ def build(out_dir, debug=False, werror=False):
     libs = ['-lws2_32', '-lbcrypt'] if WIN else ['-pthread', '-lm']
     shared = sorted(PROTO.glob('*.c')) + sorted(MONO.glob('*.c')) + [SERVER / 'sv_os.c']
     programs = {
-        'totk-server': [SERVER / n for n in ('sv_main.c', 'sv_room.c', 'sv_store.c', 'sv_puppets.c')],
+        'totk-server': [SERVER / n for n in ('sv_main.c', 'sv_room.c', 'sv_store.c', 'sv_puppets.c', 'sv_actors.c',
+                                             'sv_owner.c')],
         'net_bot': [ROOT / 'tools' / 'net_bot.c'],
     }
     objs = {}

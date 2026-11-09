@@ -1,0 +1,14 @@
+case pickup-far-owner A pick-up from an owner further than 20 m goes at once
+player A
+player B
+actor Fruit 0:473 Item_Fruit_A 0,0,0
+walk A 0 1 5,0,0 5,0,0
+walk A 5 15 5,0,0 40,0,0
+walk B 0 1 -40,0,0 -40,0,0
+walk B 20 30 -40,0,0 -2,0,0
+at 0 A join
+at 0 B join
+run 40
+expect owner Fruit at 25 is A
+expect owner Fruit at 31.5 is B
+expect cause Fruit pickup == 1

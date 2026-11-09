@@ -17,6 +17,7 @@
  * Single-threaded: only sv_main.c's loop calls in here.
  */
 #include "sv.h"
+#include "sv_actors.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -84,6 +85,7 @@ typedef struct player {
     float pos[3], yaw;
     uint64_t tp_to, tp_deadline; /* the player's open teleport request */
     bucket chat, action;   /* kept across reconnects, so leaving and coming back does not refill them */
+    uint32_t features;     /* the add-ons granted to its current connection */
     uint64_t warned;
 } player;
 
@@ -577,6 +579,7 @@ static void player_remove(player *p, uint16_t reason) {
     tp_target_gone(p);
     uint64_t account = p->account;
     sv_puppets_drop((int)(p - G.p));
+    if (p->features & OW_FEAT_ACTORS) sva_player_leave(account, G.now);
     memset(p, 0, sizeof *p);
     p->conn = -1;
     ow_depart d = { .account = account, .reason = reason };
@@ -589,6 +592,7 @@ static void player_hold(player *p) {
     p->held_until = G.now + (uint64_t)G.cfg.hold_seconds * SEC;
     p->tp_to = 0;
     tp_target_gone(p);
+    if (p->features & OW_FEAT_ACTORS) sva_player_away(p->account, G.now);
     G.roster_dirty = 1;
     sv_log("%s dropped; held for %d s", p->nick, G.cfg.hold_seconds);
 }
@@ -1052,6 +1056,14 @@ static void on_proof(conn *c, const ow_frame *f) {
     rules_of(&a.rules);
     conn_write(c, OW_T_admit, &a);
     ow_link_set_features(&c->link, a.features);
+    /* The actors add-on knows only games that have it: one that resumes without it leaves the actors' room. */
+    if ((p->features & OW_FEAT_ACTORS) && !(a.features & OW_FEAT_ACTORS)) sva_player_leave(p->account, G.now);
+    p->features = a.features;
+    if (a.features & OW_FEAT_ACTORS) {
+        sva_player_join(p->account, G.now);
+        sva_player_area(p->account, &p->area, G.now);
+        if (p->has_pos) sva_player_pos(p->account, p->scene, p->pos, G.now);
+    }
 
     static ow_roster roster;
     static ow_teams teams;
@@ -1148,6 +1160,7 @@ static void on_live(conn *c, const ow_frame *f) {
         if (memcmp(&p->area, &g_msg.area.where, sizeof p->area)) G.roster_soft = 1;
         p->area = g_msg.area.where;
         sv_puppets_area(c->player, &p->area);
+        if (p->features & OW_FEAT_ACTORS) sva_player_area(p->account, &p->area, G.now);
         break;
     case OW_T_vitals:
         if (p->hearts_q != g_msg.vitals.hearts_q || p->hearts_max_q != g_msg.vitals.hearts_max_q ||
@@ -1162,6 +1175,7 @@ static void on_live(conn *c, const ow_frame *f) {
         p->scene = g_msg.position.scene;
         memcpy(p->pos, g_msg.position.pos, sizeof p->pos);
         p->yaw = g_msg.position.yaw;
+        if (p->features & OW_FEAT_ACTORS) sva_player_pos(p->account, p->scene, p->pos, G.now);
         break;
     case OW_T_character:
         if (p->character != g_msg.character.character) {
@@ -1182,16 +1196,29 @@ static void on_live(conn *c, const ow_frame *f) {
     case OW_T_summon: if (action_ok(p)) on_summon(p, &g_msg.summon); break;
     case OW_T_mod_action: if (action_ok(p)) on_mod_action(p, &g_msg.mod_action); break;
     case OW_T_announce: if (action_ok(p)) on_announce(p, &g_msg.announce); break;
+    /* The actors add-on (sv_actors.c). The reader let these through only on a link that was granted it. */
+    case OW_T_offer: case OW_T_release: case OW_T_actor_send: case OW_T_hold: case OW_T_hit: case OW_T_spawn:
+    case OW_T_gone: case OW_T_group: case OW_T_herd: case OW_T_take:
+        sva_message(p->account, f->type, &g_msg, G.now);
+        break;
     default:
         /* A sealed client type the session has no use for (a second proof). The reader already refused every
-         * type of an add-on the session was not granted. */
+         * type of an add-on this link was not granted. */
         sv_log("%s: unexpected %s; disconnected", p->nick, ow_msg(f->type)->name);
         conn_end(c, 1, OW_WHY_PROTOCOL, "unexpected message", 0);
     }
 }
 
+/* Whether a live connection's frame of this type is an actor frame: those have their own, larger budget
+ * (sv_actors.h, SVA_FRAME_BURST), since a game offers hundreds of actors at once when it loads a busy place. */
+static int actor_frame(const conn *c, uint16_t type) {
+    return c->state == C_LIVE && c->player >= 0 && type >= OW_T_offer && type <= OW_T_taken;
+}
+
 static void on_frame(conn *c, const ow_frame *f) {
-    if (!take(&c->frames, G.cfg.frame_burst, G.cfg.frames_per_second, G.now)) {
+    int ok = actor_frame(c, f->type) ? sva_frame_ok(G.p[c->player].account, G.now)
+                                     : take(&c->frames, G.cfg.frame_burst, G.cfg.frames_per_second, G.now);
+    if (!ok) {
         sv_log("%s: flooding (over %d frames at once); disconnected", c->addr, G.cfg.frame_burst);
         conn_end(c, 1, OW_WHY_PROTOCOL, "too many frames", 0);
         return;
@@ -1384,6 +1411,19 @@ static void send_dirty(void) {
     }
 }
 
+/* ---- the actors add-on's way out ---- */
+
+static void actors_send(void *ctx, uint64_t account, uint16_t type, const void *msg) {
+    (void)ctx;
+    player *p = find_player(account);
+    if (p && (p->features & OW_FEAT_ACTORS)) send_to(p, type, msg);
+}
+
+static void actors_log(void *ctx, const char *line) {
+    (void)ctx;
+    sv_log("%s", line);
+}
+
 /* ---- the loop ---- */
 
 int sv_room_start(const sv_config *cfg) {
@@ -1398,6 +1438,8 @@ int sv_room_start(const sv_config *cfg) {
         return -1;
     }
     G.now = sv_now_us();
+    sva_io io = { .send = actors_send, .log = actors_log };
+    sva_init(&io, INTEREST_M);
     return 0;
 }
 
@@ -1421,6 +1463,7 @@ void sv_room_poll(int timeout_ms) {
     }
     if (sv_poll_readable(&fds[0])) accept_new();
     timers();
+    sva_tick(G.now);
     send_dirty();
     for (int i = 0; i < SV_MAX_CONNS; i++) {
         conn *c = G.c[i];
@@ -1432,6 +1475,7 @@ void sv_room_poll(int timeout_ms) {
 
 void sv_room_stop(void) {
     G.now = sv_now_us();
+    sva_shutdown();
     for (int i = 0; i < SV_MAX_CONNS; i++) {
         conn *c = G.c[i];
         if (!c) continue;

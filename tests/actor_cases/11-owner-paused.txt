@@ -1,0 +1,15 @@
+case owner-paused An owner paused over 6 s counts as away: a near candidate takes its enemy by owner left
+player A
+player B
+actor Boko 0:801 Enemy_Bokoblin_Junior 0,0,0
+walk A 0 1 30,0,0 30,0,0
+walk B 0 1 -50,0,0 -50,0,0
+at 0 A join
+at 0 B join
+at 10 A area paused
+at 30 A area playing
+run 60
+expect owner Boko at 15.5 is A
+expect owner Boko at 17.5 is B
+expect cause Boko left == 1
+expect changes Boko in 18..60 == 0

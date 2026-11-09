@@ -281,6 +281,8 @@ acts on each new one within 0.2 s: `type <text>`, `enter`, `chat <text>` (type, 
 
 The server (`server/`, [server.md](server.md)): `.venv\Scripts\python tests\net_server_check.py` builds the server and the test bot (`tools/net_bot.c`) with undefined-behaviour checks that trap, runs three servers on free localhost ports and drives them with bots: sessions, chat, teams, teleports, host tools, limits and hostile clients (about a minute; `--release` tests the optimised build). Every change to `server/` or `online/proto/` passes it. CI runs it on Linux.
 
+The actors add-on ([online-wire.md](online-wire.md) 9.1): `.venv\Scripts\python tests\actor_lab.py` builds the replay lab (`tests/actor_lab.c`) with the server's actor library and plays every case of `tests/actor_cases/` on a virtual clock: bot timelines that reproduce the situations the old port's owner rules were settled on, each checked for the owner changes and messages it must give, and the steady-play bar of under 5 owner changes a minute (a few seconds). `tests\actor_server_check.py` then drives the add-on through the real server with bots (about 20 s). Every change to `server/sv_actors.c`, `server/sv_owner.c` or `online/proto/classes.txt` passes both; CI runs them on Linux and Windows.
+
 Shaders: `.venv-py314\Scripts\python tools\shader_census.py --version <ver> --translate` extracts every Maxwell shader
 to `build\<ver>\shaders\` and runs it through the translator and `spirv-val`; failure groups go to `failures.txt`.
 `tools\xlate_smoke.py` checks the translator alone, without game files.

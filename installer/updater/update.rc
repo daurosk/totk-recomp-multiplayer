@@ -1,0 +1,4 @@
+/* The resources of totk-update.exe: the icon of totk.exe (runtime/totk.ico) and the manifest (update.manifest).
+   tools/make_release.py and tests/updater_test.py compile it with windres -I runtime. */
+1 ICON "totk.ico"
+1 24 "update.manifest"

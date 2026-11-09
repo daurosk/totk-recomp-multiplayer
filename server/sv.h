@@ -20,10 +20,10 @@
 #define SV_MAX_CONNS 96
 /* Handshakes in progress at once, over all addresses. */
 #define SV_MAX_PENDING 32
-/* Add-ons this build grants (docs/online-wire.md, "Features and add-ons"); an offer of any other bit is answered
- * without it. An add-on is plugged in by implementing its message types in sv_room.c's dispatch, then adding its
- * OW_FEAT_* bit here. Granted: puppets (sv_puppets.c). */
-#define SV_FEATURES_GRANTED ((uint32_t)OW_FEAT_PUPPETS)
+/* Add-ons this build grants (docs/online-wire.md, "Features and add-ons"); a client's offer is answered with the
+ * bits it offered of these. An add-on is plugged in by implementing its message types in sv_room.c's dispatch,
+ * then adding its OW_FEAT_* bit here. Puppets: sv_puppets.c. Actors: sv_actors.c. */
+#define SV_FEATURES_GRANTED ((uint32_t)(OW_FEAT_PUPPETS | OW_FEAT_ACTORS))
 
 /* ---- configuration (sv_store.c) ---- */
 typedef struct sv_config {

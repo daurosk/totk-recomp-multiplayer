@@ -1,0 +1,28 @@
+case far-both-far The camp at 2026-11-02 19:03: two players both over 120 m from the camp flipped its owner every 2 to 4 s
+# "owner far" handed an actor whose owner's player was over 120 m away to whichever game offered next, without
+# comparing distances: 71 to 108 changes a minute (server log, camp rounds). Rule 2 needs a candidate within 120 m
+# and 10 m nearer, 5 s after the last change.
+player A
+player B
+actor Boko1 0:501 Enemy_Bokoblin_Junior 0,0,0
+actor Boko2 0:502 Enemy_Bokoblin_Junior 4,0,3
+actor Boss 0:503 Enemy_Bokoblin_Boss 2,0,-4
+actor Flag1 0:504 Obj_CampFlag_A 8,0,0
+actor Flag2 0:505 Obj_CampFlag_A -8,0,0
+# A comes to the camp, then both stand off on either side, 125 to 150 m from every camp actor, coming and going.
+walk A 0 10 60,0,0 30,0,0
+walk A 20 30 30,0,0 140,0,0
+walk A 40 60 140,0,0 125,0,10
+walk A 70 90 125,0,10 145,0,-10
+walk A 100 120 145,0,-10 130,0,0
+walk B 0 1 -140,0,0 -140,0,0
+walk B 30 50 -140,0,0 -134,0,15
+walk B 60 80 -134,0,15 -150,0,0
+walk B 90 110 -150,0,0 -136,0,-5
+at 0 A join
+at 0 B join
+run 130
+expect owner Boko1 at 15 is A
+expect changes all in 15..130 == 0
+expect kept far_margin >= 100
+expect owner Boss at 129 is A

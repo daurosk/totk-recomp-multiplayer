@@ -11,8 +11,12 @@
  *   rawsend NAME HEX                 bytes as they are, sealed stream or not (for broken clients)
  *   sealraw NAME TYPE HEX            a frame of TYPE (hex number) whose payload is HEX, sealed like a real one but
  *                                    not checked by the encoder (malformed payloads past the seal)
- *   send NAME TYPE [field=value]...  one message; OBJ fields as where.state=1, vec3 as 1,2,3
+ *   send NAME TYPE [field=value]...  one message; OBJ fields as where.state=1, vec3 as 1,2,3, list items as
+ *                                    items.0.id.serial=5 (the list grows to hold the item)
  *   flood NAME COUNT TYPE [field=value]...
+ *   repeat NAME MS TYPE [field=value]...
+ *                                    sends the message now and then every MS milliseconds (an actor's owner sends
+ *                                    its state at least every 250 ms); repeat NAME 0 stops it
  *   quiet NAME 0|1                   stop or restart the bot's own pings and its answers to the server's
  *   drop NAME                        close the socket without a goodbye
  *   walk NAME CX CY CZ [JITTER_MS] [LOSS_PCT] [SPIKE_MS]
@@ -62,6 +66,9 @@ typedef struct bot {
     uint64_t next_walk, next_spike, spike_until;
     int nheld;
     ow_self_state held[BOT_HELD_MAX];   /* states of the current delay spike, sent when it ends */
+    uint16_t rep_type;     /* repeat: the message, how often (0: none) and when next */
+    void *rep_msg;
+    uint64_t rep_every, rep_next;
 } bot;
 
 enum { BOTS = 64 };
@@ -208,6 +215,16 @@ static int set_field(const ow_struct *d, uint8_t *s, const char *path, const cha
         char *end;
         switch (f->kind) {
         case OW_K_OBJ: return dot ? set_field(f->sub, p, dot + 1, val) : -1;
+        case OW_K_LIST: { /* items.N.field: the list grows to hold item N */
+            if (!dot) return -1;
+            unsigned long idx = strtoul(dot + 1, &end, 10);
+            if (end == dot + 1 || *end != '.' || idx >= f->max) return -1;
+            uint16_t count;
+            memcpy(&count, s + f->aux, 2);
+            if (idx + 1 > count) count = (uint16_t)(idx + 1);
+            memcpy(s + f->aux, &count, 2);
+            return set_field(f->sub, p + idx * f->sub->size, end + 1, val);
+        }
         case OW_K_U8:
         case OW_K_BOOL: *p = (uint8_t)strtoul(val, &end, 0); return 0;
         case OW_K_U16: { uint16_t v = (uint16_t)strtoul(val, &end, 0); memcpy(p, &v, 2); return 0; }
@@ -274,6 +291,7 @@ static void close_bot(bot *b, const char *why) {
     sv_close(b->s);
     b->s = SV_BAD_SOCK;
     b->state = B_CLOSED;
+    b->rep_every = 0;
     emit_note(b, "closed", "why", why);
 }
 
@@ -574,6 +592,31 @@ static int split(char *line, char **argv, int max) {
     return n;
 }
 
+static void cmd_repeat(char **argv, int argc) {
+    bot *b = argc >= 3 ? find(argv[1]) : NULL;
+    if (!b || b->state != B_LIVE) {
+        emit_note(b, "error", "err", "not connected");
+        return;
+    }
+    uint64_t every = strtoull(argv[2], NULL, 10) * 1000;
+    free(b->rep_msg);
+    b->rep_msg = NULL;
+    b->rep_every = 0;
+    if (!every) return;
+    uint16_t type;
+    if (argc < 4 || build(argv, argc, 3, &type, g_msgbuf)) {
+        emit_note(b, "error", "err", "bad message");
+        return;
+    }
+    size_t size = ow_msg(type)->desc->size;
+    b->rep_msg = malloc(size);
+    if (!b->rep_msg) return;
+    memcpy(b->rep_msg, g_msgbuf, size);
+    b->rep_type = type;
+    b->rep_every = every;
+    b->rep_next = 0;
+}
+
 static int run_command(char *line) {
     char *argv[64];
     if (!strncmp(line, "echo ", 5)) {
@@ -590,6 +633,7 @@ static int run_command(char *line) {
     else if (!strcmp(c, "sealraw")) cmd_sealraw(argv, argc);
     else if (!strcmp(c, "send")) cmd_send(argv, argc, 0);
     else if (!strcmp(c, "flood")) cmd_send(argv, argc, 1);
+    else if (!strcmp(c, "repeat")) cmd_repeat(argv, argc);
     else if (!strcmp(c, "quiet") && argc >= 3 && find(argv[1])) find(argv[1])->quiet = atoi(argv[2]);
     else if (!strcmp(c, "drop") && argc >= 2 && find(argv[1])) close_bot(find(argv[1]), "dropped");
     else if (!strcmp(c, "walk") && argc >= 5 && find(argv[1])) {
@@ -637,6 +681,10 @@ int main(int argc, char **argv) {
                 if (send_msg(b, OW_T_ping, &p)) continue;
             }
             if (b->state == B_LIVE && b->walking) walk_step(b, now);
+            if (b->state == B_LIVE && b->rep_every && now >= b->rep_next) {
+                b->rep_next = now + b->rep_every;
+                if (send_msg(b, b->rep_type, b->rep_msg)) continue;
+            }
             sv_pollfd_set(&fds[n], b->s, 1, 0);
             who[n++] = b;
         }
