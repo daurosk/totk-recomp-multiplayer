@@ -313,6 +313,21 @@ static int run(char *line) {
         ret(cmd, net_ledger_spend(cmd[0] == 's', (uint32_t)atoi(a)));
     } else if (!strcmp(cmd, "skysend")) {
         ret(cmd, net_sky_send((uint32_t)atoi(a), (float)atof(b), atoi(rest_of(line, 3))));
+    } else if (!strcmp(cmd, "lootdrop")) {
+        NetLootDrop d;
+        NetActorId id;
+        memset(&d, 0, sizeof d);
+        snprintf(d.name, sizeof d.name, "%s", a);
+        d.fused = (uint32_t)strtoul(b, NULL, 0);
+        d.pos[0] = 1;
+        d.pos[1] = 2;
+        d.pos[2] = 3;
+        int r = net_loot_drop(&d, &id);
+        printf("{\"ev\":\"lootid\",\"r\":%d,\"origin\":%llu,\"serial\":%llu}\n", r, (unsigned long long)id.origin,
+               (unsigned long long)id.serial);
+    } else if (!strcmp(cmd, "loottake")) {
+        NetActorId id = {strtoull(a, NULL, 10), strtoull(b, NULL, 10)};
+        ret(cmd, net_loot_take(id));
     } else if (!strcmp(cmd, "eco")) {
         uint32_t rupees = 0, ws = 0, ls = 0, ss = 0;
         NetLedger l = {0};
@@ -361,6 +376,13 @@ int main(int argc, char **argv) {
                 js(ev[i].text);
                 printf(",\"state\":%d}\n", (int)net_state());
             }
+        NetLootEvent le[8];
+        int nle;
+        while ((nle = net_loot_poll(le, 8)) > 0)
+            for (int i = 0; i < nle; i++)
+                printf("{\"ev\":\"loot\",\"type\":%d,\"origin\":%llu,\"serial\":%llu,\"who\":%llu,\"yours\":%u,\"name\":\"%s\",\"fused\":%u,\"on\":%d}\n",
+                       (int)le[i].type, (unsigned long long)le[i].id.origin, (unsigned long long)le[i].id.serial,
+                       (unsigned long long)le[i].who, le[i].yours, le[i].drop.name, le[i].drop.fused, net_loot_on());
         uint32_t serial = net_chat_serial();
         int count = net_chat_count();
         int fresh = (int)(serial - seen) < count ? (int)(serial - seen) : count;

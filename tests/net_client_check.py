@@ -520,6 +520,9 @@ def run_eco(exe_srv, exe_bot, exe_cl, tmp):
                 break
             time.sleep(0.2)
         check(e['lights_spent'] == 1, 'and one spent')
+        on.cmd('lootdrop Item_Test 0')
+        ev = on.expect('lootid', 3)
+        check(ev is not None and ev['r'] == 0, 'loot off: a drop is not sent when the server grants no actors add-on')
         b = bots.connect('bot', 'seedEcoBot', 'Bot', features=16 | 64)
         check(b.get('ev') == 'admit', 'a bot joins the same room')
         bots.send('bot', 'ledger_note', what=2, key=0x777, count=1)

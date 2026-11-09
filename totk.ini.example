@@ -282,6 +282,8 @@
 # Shared rupees, Lights of Blessing and Korok seeds, and one Blood Moon for the room (needs a server that has them,
 # docs/server.md). Off by default.
 # net_economy = 0
+# Drops that exist once for the room and can be taken once (needs a server with the actors add-on). Off by default.
+# net_loot = 0
 # Keys, by name (a to z, 0 to 9, f2 to f12, enter, space, grave, slash, lbracket, rbracket, ...) or none. The wheel key is
 # held: aim with the mouse, the stick or the number keys, let go to choose. The Online tab rebinds them with a click.
 # net_key_chat = enter

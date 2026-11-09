@@ -167,6 +167,36 @@ int net_sky_get(NetSky *out, uint32_t *serial);
 int net_sky_is_leader(void);
 int net_sky_send(uint32_t day, float hour, int blood_moon_due);   // only the leader's is passed on
 
+// ---- shared loot (feature switch net_loot in totk.ini, off by default; the server needs the actors add-on)
+// A drop is made once, by the game that owns what made it (an enemy it runs, a chest it opened, an object it broke):
+// that game calls net_loot_drop, and every other game in range gets a NET_LOOT_SPAWNED event to make the same thing.
+// A drop is its own record and can be taken once: the game whose player picks it up calls net_loot_take and puts
+// nothing in the pouch until NET_LOOT_TAKEN says yours; every other game removes its copy. A fused drop (a weapon with
+// a material fused to it) carries the material's name hash in `fused`.
+typedef struct {
+    uint64_t origin, serial;        // the actor's id; a drop's origin is the account that made it
+} NetActorId;
+typedef struct {
+    NetActorId parent;              // what made it (zero origin and serial for none)
+    char name[64];                  // the game's actor name of the drop
+    float pos[3];
+    float vel[3];                   // a drop that is thrown or falls starts with this
+    uint32_t fused;                 // name hash of the material fused to it, 0 for none
+} NetLootDrop;
+typedef enum { NET_LOOT_SPAWNED = 1, NET_LOOT_TAKEN = 2 } NetLootType;
+typedef struct {
+    NetLootType type;
+    NetActorId id;
+    uint64_t who;                   // SPAWNED: the account that made it; TAKEN: the account that took it
+    uint8_t yours;                  // TAKEN: this game's player took it, so it belongs in this game's pouch
+    NetLootDrop drop;               // SPAWNED
+} NetLootEvent;
+int net_loot_on(void);           // the switch is on and the server granted the actors add-on
+// Tells the others about a drop this game made. Fills *id (when given) with the id to take it by. 1 when sent.
+int net_loot_drop(const NetLootDrop *drop, NetActorId *id);
+int net_loot_take(NetActorId id);
+int net_loot_poll(NetLootEvent *out, int max);   // oldest first; returns how many
+
 // ---- events for the UI. Fills out with up to max events, oldest first; returns how many.
 int net_poll_events(NetEvent *out, int max);
 
