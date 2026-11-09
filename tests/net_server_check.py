@@ -292,7 +292,8 @@ def body_a(srv, bots, keys):
     # ---- join ----
     a = bots.connect('alice', 'seedAlice', 'Alice', features=255)
     check(a.get('ev') == 'admit' and a['rank'] == 2 and a['resumed'] == 0, 'first account is admitted as the host')
-    check(a.get('features') == 0, 'release 1 grants no add-on even when all are offered')
+    granted = a.get('features', -1)
+    check(granted >= 0 and not granted & ~255 and granted & 4, 'admit grants offered add-ons only, actors among them')
     check(a.get('rules', {}).get('hold_ms') == 3000 and a['rules']['options'] & 2, 'admit carries the room rules')
     keys['alice'] = bots.keys.get('alice')
     check((srv.data / 'host.txt').read_text().strip() == keys['alice'], 'the first account is written to host.txt')

@@ -1,0 +1,22 @@
+case steady-apart Steady play in two pairs 600 m apart for ten minutes: each pair runs its own area; owner changes stay under 5 a minute
+player A
+player B
+player C
+player D
+grid Npc Npc_Village_A -360,-40 40,40 3,3 3000
+grid Box Obj_Box_A -340,-60 30,30 5,5 3100
+grid Boko Enemy_Bokoblin_Junior -320,40 20,20 2,2 3300
+grid NpcE Npc_Village_A 240,-40 40,40 3,3 4000
+grid BoxE Obj_Box_A 260,-60 30,30 5,5 4100
+grid BokoE Enemy_Bokoblin_Junior 280,40 20,20 2,2 4300
+wander A 0 600 -380,-80 -220,80 21
+follow B A 3,4 1
+wander C 0 600 220,-80 380,80 22
+follow D C -4,3 1
+at 0 A join
+at 0 B join
+at 0 C join
+at 0 D join
+run 600
+expect rate flips in 60..600 < 5
+expect rate all in 60..600 <= 10

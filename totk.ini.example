@@ -301,6 +301,18 @@
 # 25 m east or west to try the teleport. net_fake_role is the local role: player, mod or host.
 # net_fake = 0
 # net_fake_role = host
+# Teleport is on hold and comes in a later version: it does not move the player yet. 1 shows the wheel's Teleport slice
+# and the teleport request prompts, for testing; with 0 a request from another player is refused at once.
+# net_teleport = 0
+
+[update]
+# At start the game asks GitHub whether a newer TotK Recomp Multiplayer is out (a few seconds at most; no network, no
+# prompt) and offers to update: Update, Later or Skip this version (docs/updater.md). 0 turns the check off.
+# update_check = 1
+# The version Skip this version skipped (written by the prompt; unset by default): no prompt until a newer one is out.
+# update_skip = 0.1.1
+# For tests only: the release API address to ask instead of GitHub's (plain http only to 127.0.0.1 or localhost).
+# update_url = http://127.0.0.1:8765/api/releases/latest
 
 [audio]
 # none mixes without opening an audio device.

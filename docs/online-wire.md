@@ -258,15 +258,19 @@ FNV-1a 32 over the name's UTF-8 bytes without the terminating NUL (`ow_name_hash
 column `floor(x / 250)` in the low 16 bits and row `floor(z / 250)` in the high 16 bits, each a signed 16-bit number
 (`ow_herd_cell`); it is a label only, not the map section of `place`.
 
-**Ids.** A placed actor is `origin` 0 and `serial` its map instance id, the same in every game. A run-time actor is
+**Ids.** A placed actor is `origin` 0 and `serial` its map instance id, the same in every game; map ids are unique
+within a scene only, so the server reads a placed id in the scene of the game that sends it (a shrine's ids are not
+the field's). A run-time actor is
 `origin` the creating account and `serial` that game's counter, which starts at the session's `admit.server_time_us`
 and goes up by one per actor, so it is not reused, not even across a reconnect. The server refuses a run-time id whose
 origin is not the sender, and a placed id for a row whose identity is `creator` only.
 
 **Records.** The server keeps one record per shared actor: id, class, name, scene (the scene of the game that first
 offered or spawned it), owner (an account, or 0 for none), owner epoch, the last state and its time, the games that have
-it loaded, and the time of its last owner change. The epoch is 0 before the first owner and goes up by one at every
-change, to an owner or to none. Anything about an actor that names an older epoch is dropped, on both ends.
+it loaded, and the time of its last owner change. The epoch is 0 before the first owner and goes up at every change, to an
+owner or to none. It never goes back for an id, even when the server drops a record nobody has loaded and makes it
+again later (the server counts epochs for the whole room); a spawn starts at 1. Anything about an actor that names an
+older epoch than the newest one seen is dropped, on both ends.
 
 **Interest.** A game is in an actor's interest while its player is in the actor's scene and within
 `rules.interest_m` (250 m) of the actor; it leaves the interest only 20 m further out, so a player on the edge does not
@@ -302,26 +306,31 @@ takes a hit to the owner with the attacker's account, `spawned` and `gone` tell 
 
 **The owner rules.** Distances run from a player's position to the actor's last position (for a group, its centre). A
 player is *present* while its game is connected and its place is `OW_PLACE_PLAYING`. The numbers are the ones
-SyncFix's rounds settled; `server/sv_owner.h` names each.
+the old port's rounds settled (its S1 rules); `server/sv_owner.h` names each.
 
 | # | Rule | Cause |
 |---|---|---|
-| 1 | **No owner.** The nearest candidate gets it when its player is within 120 m and no other present player is 5 m nearer. A nearer player whose game has not offered within 3 s stops holding it back. Otherwise the actor stays without an owner until a near game offers. | `OFFER` |
+| 1 | **No owner.** The nearest candidate gets it when its player is within 120 m and no other present player is 5 m nearer. A nearer player whose game has not offered within 3 s stops holding it back, and one whose game has just released or unloaded it never does. Otherwise the actor stays without an owner until a near game offers. | `OFFER` |
 | 2 | **Owner far.** When the owner's player is over 120 m away, a candidate within 120 m that is 10 m nearer takes it, but only 5 s after the actor's last change. | `FAR` |
 | 3 | **Clearly closer.** A candidate whose player is at most half the owner's distance away and 15 m nearer takes it, but only 20 s after the actor's last change, wherever the players are. | `CLOSER` |
 | 4 | **Pick-up.** For items, world objects and devices: a candidate whose player is within 3 m, with the owner's player further away, takes it at once; when both players are within 20 m it waits the same 20 s. | `PICKUP` |
-| 5 | **Still things keep their owner.** For a row marked `still`, an actor that has not moved 1 m in the last 5 s does not change owner by rule 3. | |
+| 5 | **Still things keep their owner.** An actor that has not moved 1 m in the last 5 s does not change owner by rule 3, whatever its class: who runs it matters once a player touches it, and a touch moves it by rule 4 or a fight by rule 7. A thing that does not act by itself (items, world and map objects, devices, rows marked `still`) does not change by rule 2 either while it lies still; an enemy may stand still only because its far owner's game no longer runs it, so rule 2 still applies to it. | |
 | 6 | **Asleep.** An actor whose owner's last state has `OW_POSE_ASLEEP` does not change owner by rules 2 or 3. | |
 | 7 | **Fights.** An enemy (row `fight`) hit in the last 10 s, and a boss (row `lock`) while a present player is within 120 m, stay with their owner: rules 3 and 4 do not apply, rule 2 only beyond 160 m, and an owner paused for over 6 s counts as away (rule 9). | |
 | 8 | **Followers.** A part (row `part=PREFIX`) goes to the owner of the nearest record within 60 m whose name starts with the prefix and that is not a part itself, and follows it on every change; a hit on a part counts as one on its body for rule 7. A held object (row `held`) within 12 m of an enemy or boss goes to that one's owner, unless a player holds it. A spawn whose parent is a record follows the parent's owner (summons). A row marked `fixed` (projectiles) never changes owner. A row marked `quest`, once owned, moves only by rules 9 and 10. | the leader's |
-| 9 | **The owner leaving.** An owner that is away (loading, dead, on the title, or its connection lost and held; paused, after 6 s) frees its actors for rule 1 at once. Until a candidate qualifies they stay with it, so a quick reconnect finds them. When its session ends for good, each actor it owned goes by rule 1, or to owner 0. | `LEFT` |
+| 9 | **The owner leaving.** An owner that is away (loading, dead, on the title, or its connection lost and held; paused, after 6 s) frees its actors for rule 1 at once. Until a candidate qualifies they stay with it, so a quick reconnect finds them. An owner that is playing but has sent no state of an actor for 2 s has stopped running it, and gives it up as by `release`. When its session ends for good, each actor it owned goes by rule 1, or to owner 0. | `LEFT` |
 | 10 | **Holds.** `hold` on takes the actor, and its whole group, for the holder at once and at any distance, unless another game holds it: then the asker gets `owner` restating the holder, and lets go. While held, no other rule moves it. When the hold ends the actor stays with the holder 5 s at least. | `HOLD` |
 | 11 | **Groups.** A group (from `group`, or for rows marked `cluster` the actors within 6 m of one another, chained, when one is a `core` row or two have moved 1 m since the server first saw them) is decided as one record at its centre, by the same rules, and its members change together. | the group's |
 
 The server tries the rules for each actor once a second and on every offer, release, hold and leave, in this order:
 holds, the owner leaving, followers, then 1 to 4 limited by 5 to 7. Rules 2 to 4 need the candidate to have offered
-the actor, so a game never gets one it cannot run. In steady play the rules keep owner changes under 5 a minute for
-the whole room, which `tests/actor_lab.py` measures on every case.
+the actor, so a game never gets one it cannot run. In steady play the rules keep owner changes by rules 2 to 4 under 5
+a minute for the whole room, which `tests/actor_lab.py` measures (cases 23 and 24); changes as actors come into range
+(rule 1) and as owners leave or unload them (rule 9) are counted apart, as the old port's rounds counted them.
+
+**Budgets.** A game may send 2000 actor frames at once and then 400 a second, apart from the room's frame budget,
+since loading a busy place offers hundreds of actors at once; past that it is cut off as a flood. At most 16384 records
+exist at once; offers and spawns past that are ignored.
 
 **Hits.** The server passes a `hit` to the owner as `hit_in` when the target is a record under that epoch, its owner is
 another game and the hitter's player is within 80 m of it; otherwise the hit is dropped, and so is a hit on an actor
