@@ -17,6 +17,7 @@
  * Single-threaded: only sv_main.c's loop calls in here.
  */
 #include "sv.h"
+#include "sv_save.h"
 
 #include <ctype.h>
 #include <stdarg.h>
@@ -157,6 +158,15 @@ static void send_to(player *p, uint16_t type, const void *msg) {
 static void send_all(uint16_t type, const void *msg, const player *except) {
     for (int i = 0; i < OW_PLAYERS_MAX; i++)
         if (&G.p[i] != except) send_to(&G.p[i], type, msg);
+}
+
+/* sv_save.c's way out: to one account, or to every live player but except when to is 0. */
+static void save_send(uint64_t to, uint64_t except, uint16_t type, const void *msg) {
+    for (int i = 0; i < OW_PLAYERS_MAX; i++) {
+        player *q = &G.p[i];
+        if (!live(q) || q->account == except || (to && q->account != to)) continue;
+        if ((G.c[q->conn]->link.features & OW_FEAT_SAVES)) conn_write(G.c[q->conn], type, msg);
+    }
 }
 
 static void vline(char *out, size_t max, const char *fmt, va_list ap) {
@@ -576,6 +586,7 @@ static void player_remove(player *p, uint16_t reason) {
     team_drop_invites_of(p->account);
     tp_target_gone(p);
     uint64_t account = p->account;
+    sv_save_live(account, 0, 0);
     memset(p, 0, sizeof *p);
     p->conn = -1;
     ow_depart d = { .account = account, .reason = reason };
@@ -587,6 +598,7 @@ static void player_hold(player *p) {
     p->conn = -1;
     p->held_until = G.now + (uint64_t)G.cfg.hold_seconds * SEC;
     p->tp_to = 0;
+    sv_save_live(p->account, 0, 0);
     tp_target_gone(p);
     G.roster_dirty = 1;
     sv_log("%s dropped; held for %d s", p->nick, G.cfg.hold_seconds);
@@ -1060,6 +1072,10 @@ static void on_proof(conn *c, const ow_frame *f) {
     conn_write(c, OW_T_roster, &roster);
     conn_write(c, OW_T_teams, &teams);
     conn_write(c, OW_T_positions, &pos);
+    if (a.features & OW_FEAT_SAVES) { /* the snapshot comes before join_ready, so the title hands over a whole save */
+        sv_save_live(p->account, 1, p->rank == OW_RANK_HOST);
+        sv_save_snapshot(p->account);
+    }
     ow_join_ready jr = { 0, 0, roster.players_count };
     conn_write(c, OW_T_join_ready, &jr);
     if (G.cfg.motd[0]) {
@@ -1147,6 +1163,8 @@ static void on_live(conn *c, const ow_frame *f) {
         }
         break;
     case OW_T_say: on_say(p, &g_msg.say); break;
+    case OW_T_save_write: sv_save_on_save_write(p->account, &g_msg.save_write); break;
+    case OW_T_world_write: sv_save_on_world_write(p->account, &g_msg.world_write); break;
     case OW_T_mark: if (action_ok(p)) on_mark(p, &g_msg.mark); break;
     case OW_T_team_create: if (action_ok(p)) on_team_create(p, &g_msg.team_create); break;
     case OW_T_team_invite: if (action_ok(p)) on_team_invite(p, &g_msg.team_invite); break;
@@ -1302,6 +1320,7 @@ static void conn_flush(conn *c) {
 
 static void timers(void) {
     uint64_t now = G.now;
+    sv_save_flush(now, 0);
     for (int i = 0; i < SV_MAX_CONNS; i++) {
         conn *c = G.c[i];
         if (!c) continue;
@@ -1367,6 +1386,7 @@ int sv_room_start(const sv_config *cfg) {
     G.cfg = *cfg;
     G.next_team = 1;
     for (int i = 0; i < OW_PLAYERS_MAX; i++) G.p[i].conn = -1;
+    if (sv_save_open(g_store.dir, save_send)) return 1;
     char err[160];
     G.listener = sv_listen(cfg->bind, cfg->port, err, sizeof err);
     if (G.listener == SV_BAD_SOCK) {
@@ -1408,6 +1428,7 @@ void sv_room_poll(int timeout_ms) {
 
 void sv_room_stop(void) {
     G.now = sv_now_us();
+    sv_save_close();
     for (int i = 0; i < SV_MAX_CONNS; i++) {
         conn *c = G.c[i];
         if (!c) continue;
