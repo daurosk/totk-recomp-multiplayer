@@ -32,6 +32,8 @@ void net_fake_team_answer(uint32_t invite, int accept);
 void net_fake_team_leave(void);
 int net_fake_host_action(NetHostAction action, uint32_t target, const char *text);
 int net_fake_poll_events(NetEvent *out, int max);
+void net_fake_set_self(const NetSelf *self);
+int net_fake_puppets(NetPuppet *out, int max);
 
 #ifdef __cplusplus
 }
@@ -62,4 +64,6 @@ int net_fake_poll_events(NetEvent *out, int max);
 #define net_team_leave net_fake_team_leave
 #define net_host_action net_fake_host_action
 #define net_poll_events net_fake_poll_events
+#define net_set_self net_fake_set_self
+#define net_puppets net_fake_puppets
 #endif

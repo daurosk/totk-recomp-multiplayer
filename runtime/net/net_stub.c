@@ -3,6 +3,7 @@
 // the local player plus four invented players, a team, scripted chat, an invite and a teleport request arriving after
 // a few seconds, and replies to whispers. TOTK_NET_FAKE_ROLE=player|mod|host (default host) sets the local role.
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -263,6 +264,37 @@ void net_set_local(const char *area, const float pos[3], const char *character) 
         copy(p->area, sizeof p->area, g_local_area);
         copy(p->character, sizeof p->character, g_local_char);
     }
+}
+
+// The invented players as puppets: each walks a circle of 4 m around its place beside the local player, once every
+// 8 seconds, so name tags and bodies can be tried offline.
+static int g_self_in_world = 1;
+
+void net_set_self(const NetSelf *self) {
+    if (self) g_self_in_world = self->in_world;
+}
+
+int net_puppets(NetPuppet *out, int max) {
+    if (g_state != NET_ONLINE || !g_t0_ns || !g_self_in_world) return 0;
+    double t = (plat_now_ns() - g_t0_ns) / 1e9;
+    int n = 0;
+    for (int i = 1; i < g_npl && n < max; i++) {
+        NetPuppet *p = &out[n++];
+        memset(p, 0, sizeof *p);
+        p->id = g_pl[i].id;
+        copy(p->name, sizeof p->name, g_pl[i].name);
+        p->zelda = !strcmp(g_pl[i].character, "Zelda");
+        double a = t * 6.283185307 / 8.0 + i;
+        p->pos[0] = g_pl[i].pos[0] + 4.0f * (float)cos(a);
+        p->pos[1] = g_pl[i].pos[1];
+        p->pos[2] = g_pl[i].pos[2] + 4.0f * (float)sin(a);
+        float sp = 4.0f * 6.283185f / 8.0f;
+        p->vel[0] = -sp * (float)sin(a), p->vel[2] = sp * (float)cos(a);
+        p->yaw = atan2f(p->vel[0], p->vel[2]);   // facing along the walk, yaw 0 facing +z
+        p->rot[1] = sinf(p->yaw / 2), p->rot[3] = cosf(p->yaw / 2);
+        p->alpha = t < 0.25 ? (float)(t / 0.25) : 1.0f;
+    }
+    return n;
 }
 
 int net_chat_count(void) { return g_nchat < NET_CHAT_KEEP ? g_nchat : NET_CHAT_KEEP; }

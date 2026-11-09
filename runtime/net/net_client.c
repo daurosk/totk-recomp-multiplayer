@@ -53,6 +53,7 @@ typedef int nsock;
 #include "host.h"
 #include "net/net_client.h"
 #include "net/net_fake.h"
+#include "net/net_puppets.h"
 #include "ow_wire.h"
 #include "platform/platform.h"
 
@@ -275,6 +276,8 @@ static struct {
     int16_t cell[2];
     int area_sent;
     uint8_t char_sent;
+    uint8_t place_sent;             // the OW_PLACE_* of the last area report
+    uint64_t best_rtt;              // the shortest ping round trip, whose reply set the server-clock offset
 } C = {.s = NSOCK_BAD};
 
 static union {
@@ -299,6 +302,7 @@ static union {
     ow_tp_result tp_result;
     ow_go_to go_to;
     ow_mod_done mod_done;
+    ow_player_state player_state;
 } M;
 
 static const ow_roster_row *row_of(uint64_t account) {
@@ -409,6 +413,7 @@ static void pub_roster(void) {
 
 static void room_clear(void) {
     C.nrows = C.nspots = C.nteams = 0;
+    np_reset();
     pub_roster();
 }
 
@@ -596,6 +601,7 @@ static void on_roster(void) {
     int had = old != NULL;
     C.nrows = M.roster.players_count;
     memcpy(C.rows, M.roster.players, (size_t)C.nrows * sizeof *C.rows);
+    np_roster(C.rows, C.nrows, C.account);
     const ow_roster_row *me = row_of(C.account);
     if (had && me && me->muted != old_muted) {
         NetEvent e = {.type = NET_EV_MUTED, .player = (uint32_t)C.account, .accepted = me->muted};
@@ -684,7 +690,7 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         plat_mutex_lock(&S.mx);
         uint8_t ch = S.character;
         plat_mutex_unlock(&S.mx);
-        e = ow_hs_client_challenge(&C.hs, &M.challenge, C.have_pin ? C.pin : NULL, &C.id, nick, ch, claim, OW_FEAT_CORE, &pr);
+        e = ow_hs_client_challenge(&C.hs, &M.challenge, C.have_pin ? C.pin : NULL, &C.id, nick, ch, claim, OW_FEAT_PUPPETS, &pr);
         if (!e) e = ow_hs_seal(&C.hs, &C.link);
         ow_hs_wipe(&C.hs);
         wipe(claim, sizeof claim);
@@ -716,6 +722,9 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         C.resumed_once = M.admit.resumed;
         C.admitted = 1;
         C.phase = P_JOINING;
+        // the server's clock, first from admit (off by the one-way delay), then from the pings (on_frame, pong)
+        C.best_rtt = ~0ull;
+        np_clock((int64_t)M.admit.server_time_us - (int64_t)now_us());
         rt_log("net: admitted as %s (account %llu)%s", M.admit.nickname, (unsigned long long)C.account,
                M.admit.resumed ? ", session resumed" : "");
         break;
@@ -732,7 +741,18 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         if (send_msg(OW_T_pong, &r)) return END_LOST;
         break;
     }
-    case OW_T_pong: break;
+    case OW_T_pong: {
+        // the server's clock is reply_us at the round trip's middle; the shortest trips say it best, and the best
+        // is forgotten slowly so a route that got slower still moves the offset
+        uint64_t t = now_us(), rtt = t > M.pong.echo_us ? t - M.pong.echo_us : 0;
+        if (C.best_rtt != ~0ull) C.best_rtt += C.best_rtt / 50 + 100;
+        if (rtt <= C.best_rtt) {
+            C.best_rtt = rtt;
+            np_clock((int64_t)M.pong.reply_us + (int64_t)(rtt / 2) - (int64_t)t);
+        }
+        break;
+    }
+    case OW_T_player_state: np_state(&M.player_state, now_us()); break;
     case OW_T_roster: on_roster(); break;
     case OW_T_teams:
         C.nteams = M.teams.list_count;
@@ -759,6 +779,7 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         }
         break;
     case OW_T_depart:
+        np_depart(M.depart.account);
         if (M.depart.account != C.account) {
             NetEvent ev = {.type = NET_EV_PLAYER_LEFT, .player = (uint32_t)M.depart.account};
             copy_text(ev.name, sizeof ev.name, name_of(M.depart.account));
@@ -823,6 +844,10 @@ static void send_reports(uint64_t now) {
         ow_character m = {.character = ch};
         if (!send_msg(OW_T_character, &m)) C.char_sent = ch;
     }
+    static ow_self_state st;
+    int in_world;
+    if (np_self_due(now, &st, &in_world) && (C.link.features & OW_FEAT_PUPPETS)) send_msg(OW_T_self_state, &st);
+    uint8_t place = in_world == 0 ? OW_PLACE_LOADING : OW_PLACE_PLAYING;
     if (!have) return;
     float dx = p[0] - C.sent_pos[0], dy = p[1] - C.sent_pos[1], dz = p[2] - C.sent_pos[2];
     int jumped = C.sent_any && dx * dx + dy * dy + dz * dz > NC_JUMP_M * NC_JUMP_M;
@@ -836,10 +861,11 @@ static void send_reports(uint64_t now) {
     }
     // the map section: kilometre squares from the map's corner (the world is about 12 by 10 km around the origin)
     int16_t cell[2] = {(int16_t)((p[0] + 6000.0f) / 1000.0f), (int16_t)((p[2] + 5000.0f) / 1000.0f)};
-    if (!C.area_sent || cell[0] != C.cell[0] || cell[1] != C.cell[1]) {
-        ow_area m = {.where = {.scene = 0, .cell_x = cell[0], .cell_y = cell[1], .state = OW_PLACE_PLAYING}};
+    if (!C.area_sent || cell[0] != C.cell[0] || cell[1] != C.cell[1] || place != C.place_sent) {
+        ow_area m = {.where = {.scene = 0, .cell_x = cell[0], .cell_y = cell[1], .state = place}};
         if (!send_msg(OW_T_area, &m)) {
             C.cell[0] = cell[0], C.cell[1] = cell[1];
+            C.place_sent = place;
             C.area_sent = 1;
         }
     }
@@ -1298,6 +1324,27 @@ void net_set_local(const char *area, const float pos[3], const char *character) 
     if (pos) memcpy(S.pos, pos, sizeof S.pos), S.have_pos = 1;
     S.character = !strcmp(G.character, "Zelda") ? OW_CHAR_ZELDA : OW_CHAR_LINK;
     plat_mutex_unlock(&S.mx);
+}
+
+// ---- puppets (net/net_puppets.c)
+
+void net_set_self(const NetSelf *self) {
+    if (fake()) {
+        net_fake_set_self(self);
+        return;
+    }
+    np_set_self(self);
+    if (!self || !self->in_world) return;
+    // the body's position is the player's position too (the 1 Hz report and the map section)
+    memcpy(G.pos, self->pos, sizeof G.pos), G.have_pos = 1;
+    plat_mutex_lock(&S.mx);
+    memcpy(S.pos, self->pos, sizeof S.pos), S.have_pos = 1;
+    plat_mutex_unlock(&S.mx);
+}
+
+int net_puppets(NetPuppet *out, int max) {
+    if (fake()) return net_fake_puppets(out, max);
+    return G.state == NET_ONLINE ? np_puppets(out, max) : 0;
 }
 
 int net_chat_count(void) {

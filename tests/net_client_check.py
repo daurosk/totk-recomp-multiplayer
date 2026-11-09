@@ -12,6 +12,10 @@ replaced by small shims, no game) with MSYS2 Clang or $CC, then:
   kick, ban), a reconnect within the hold that the others do not see, a kick and a ban of the client from the console,
   the server going away (lost connection after the hold) and another server on the same address (a changed key).
 - B, a room with a password and two places: no password, a wrong one, the right one, then a full room.
+- P, puppets: bots walk the tour of tools/net_bot_path.h (walk, run, glide with a sharp turn, climb, fall) and the
+  client's smoothed puppet is measured against where the bot really was at the puppet's render time, on a clean
+  stream and on one with 20 ms of send jitter and 10 % of states lost (p95 within 0.3 m); the puppet's animation and
+  glide follow; it goes when its player loads, leaves or the client itself loads, and comes back after.
 - A fake server of another protocol version, the client with no address, and TOTK_NET_FAKE=1.
 
 Each check prints ok or FAIL; the exit code is the number of failures. docs/online-ui.md describes the client.
@@ -50,10 +54,11 @@ def build_client(out):
     """tests/net_client_main.c with the client, the fake, the wire and Monocypher; returns the program's path."""
     out.mkdir(parents=True, exist_ok=True)
     exe = out / ('net_client_main' + ('.exe' if sys.platform == 'win32' else ''))
-    srcs = [ROOT / 'runtime/net/net_client.c', ROOT / 'runtime/net/net_stub.c', ROOT / 'tests/net_client_main.c']
+    srcs = [ROOT / 'runtime/net' / n for n in ('net_client.c', 'net_stub.c', 'net_puppets.c', 'net_smooth.c')]
+    srcs += [ROOT / 'tests/net_client_main.c']
     srcs += sorted((ROOT / 'online/proto').glob('*.c')) + sorted((ROOT / 'online/third_party/monocypher').glob('*.c'))
     flags = ['-std=gnu11', '-Wall', '-Wextra', '-O1', '-g', '-I', str(ROOT / 'runtime'), '-I', str(ROOT / 'online/proto')]
-    libs = ['-lws2_32', '-lbcrypt'] if sys.platform == 'win32' else ['-pthread']
+    libs = ['-lws2_32', '-lbcrypt'] if sys.platform == 'win32' else ['-pthread', '-lm']
     p = subprocess.run(build_server.compiler() + flags + [str(s) for s in srcs] + ['-o', str(exe)] + libs,
                        capture_output=True, text=True, env=build_server.env())
     if p.returncode:
@@ -566,6 +571,85 @@ def run_c(exe_cl, tmp):
         fk.stop()
 
 
+def puppets(cl, pred=None, timeout=3.0):
+    """The client's puppet list once it satisfies pred (or at once), as a dict by id."""
+    end = time.time() + timeout
+    while True:
+        cl.cmd('puppets')
+        ev = cl.expect('puppets', 2)
+        got = {p['id']: p for p in (ev or {}).get('list', [])}
+        if pred is None or pred(got) or time.time() > end:
+            return got
+        time.sleep(0.1)
+
+
+def run_p(exe_srv, exe_bot, exe_cl, tmp):
+    port = free_port()
+    addr = f'127.0.0.1:{port}'
+    settings = dict(max_players=8, open=True, hold_seconds=2, frame_burst=400, frames_per_second=200.0)
+    srv = Server(exe_srv, tmp / 'p', port, settings)
+    bots = Bots(exe_bot, port)
+    cl = Client(exe_cl, tmp / 'profile_p')
+    try:
+        ev = cl.online(addr, 'Cal')
+        check(ev is not None and ev['state'] == ONLINE, 'puppets: the client joins')
+        cl.cmd('self 2 0 0')
+        walker = bots.connect('wa', 'seedWalker', 'Walker', features=1, char=1)
+        WA = walker.get('account')
+        for name in ('wa',):
+            bots.send(name, 'area', **{'where.state': 1})
+        bots.cmd('walk wa 0 0 0')
+        got = puppets(cl, lambda g: WA in g)
+        p = got.get(WA)
+        check(p is not None, 'puppets: a walking bot shows as a puppet')
+        check(p is not None and p['name'] == 'Walker' and p['zelda'] == 1, 'puppets: with its name and character')
+        time.sleep(1.0)
+        cl.cmd(f'puppetcheck {WA} 0 0 0 16')
+        r = cl.expect('puppetcheck', 25)
+        check(r is not None and r['n'] > 1000 and r['gaps'] == 0, f'puppets: shown all through a 16 s tour ({r})')
+        if r:
+            check(r['p95'] <= 0.3, f'puppets: p95 error {r["p95"]:.3f} m, p50 {r["p50"]:.3f}, max {r["max"]:.2f}, '
+                                   f'delay {r["delay_ms"]:.0f} ms (clean stream)')
+            check(r['anims'] >= r['n'] * 0.9, f'puppets: the animation follows the tour ({r["anims"]} of {r["n"]})')
+            check(r['glides'] >= r['n'] * 0.2, f'puppets: the glide shows while gliding ({r["glides"]} of {r["n"]})')
+        bots.cmd('walk wa 0 0 0 20 10')
+        time.sleep(1.5)
+        cl.cmd(f'puppetcheck {WA} 0 0 0 16')
+        r = cl.expect('puppetcheck', 25)
+        check(r is not None and r['gaps'] == 0 and r['p95'] <= 0.3,
+              f'puppets: p95 within 0.3 m with 20 ms jitter and 10 % loss ({r})')
+        bots.cmd('walk wa 0 0 0')
+        # the walker loads: its puppet fades and goes
+        bots.send('wa', 'area', **{'where.state': 2})
+        t0 = time.time()
+        got = puppets(cl, lambda g: WA not in g, 3)
+        check(WA not in got, f'puppets: a player in a loading screen goes ({time.time() - t0:.1f} s)')
+        bots.send('wa', 'area', **{'where.state': 1})
+        got = puppets(cl, lambda g: WA in g)
+        check(WA in got, 'puppets: and comes back after it')
+        # the client itself loads: nothing shows, then the puppet is back
+        cl.cmd('self 2 0 0 0 0')
+        got = puppets(cl, lambda g: not g, 2)
+        check(not got, 'puppets: none while the client itself is loading')
+        cl.cmd('self 2 0 0')
+        got = puppets(cl, lambda g: WA in g)
+        check(WA in got, 'puppets: back once the client is in the world again')
+        # a second walker far away is out of interest
+        bots.connect('fa', 'seedFar', 'Far', features=1)
+        bots.send('fa', 'area', **{'where.state': 1})
+        bots.cmd('walk fa 2000 0 0')
+        time.sleep(1.0)
+        check(len(puppets(cl)) == 1, 'puppets: a walker 2 km away does not show')
+        # leaving: at once, with no fade
+        bots.cmd('bye wa')
+        got = puppets(cl, lambda g: WA not in g, 1.0)
+        check(WA not in got, 'puppets: a player who leaves goes at once')
+    finally:
+        cl.stop()
+        bots.stop()
+        srv.stop()
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--keep', action='store_true', help='keep the data folders')
@@ -577,6 +661,7 @@ def main():
         t0 = time.time()
         run_a(exe_srv, exe_bot, exe_cl, tmp)
         run_b(exe_srv, exe_bot, exe_cl, tmp)
+        run_p(exe_srv, exe_bot, exe_cl, tmp)
         run_c(exe_cl, tmp)
         print(f'{len(sc.FAILS)} failures in {time.time() - t0:.0f} s')
         for f in sc.FAILS:

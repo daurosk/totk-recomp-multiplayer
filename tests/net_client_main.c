@@ -14,6 +14,12 @@
  *   host ACTION ID [TEXT...]            net_host_action with a NetHostAction number
  *   pos X Y Z                           net_set_local
  *   drop                                net_test_drop: the socket closes as if the network failed
+ *   self X Y Z [YAW] [INWORLD]          net_set_self, standing still (INWORLD 0: a loading screen)
+ *   puppets                             {"ev":"puppets", list of net_puppets}
+ *   puppetcheck ID CX CY CZ SECONDS     for SECONDS, every loop, compares puppet ID with where the walking bot of
+ *                                       tools/net_bot_path.h around (CX, CY, CZ) was at the puppet's render time, then
+ *                                       prints {"ev":"puppetcheck", n, p50, p95, max (metres), delay_ms, gaps, anims,
+ *                                       glides}: gaps counts loop turns the puppet was missing
  *   dump                                {"ev":"dump", state, self, status, players, teams}
  *   echo TEXT | quit
  * Out: {"ev":"event", type, player, request, accepted, pos, name, text} for each net_poll_events event,
@@ -32,6 +38,7 @@
 #include <time.h>
 #include <unistd.h>
 #endif
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,8 +48,10 @@
 #include "host.h"
 #include "net/net_client.h"
 #include "platform/platform.h"
+#include "../tools/net_bot_path.h"
 
 void net_test_drop(void);
+uint64_t net_test_puppet_render(uint32_t id, uint64_t *delay_us);
 
 /* ---- shims of the runtime */
 
@@ -250,6 +259,51 @@ static const char *rest_of(char *line, int words) {
     return s;
 }
 
+/* ---- puppetcheck: the smoothed puppet against the bot's real path */
+#define PC_MAX 20000
+static struct {
+    int on;
+    uint32_t id;
+    double c[3], seconds;
+    uint64_t until, delay_sum;
+    int n, gaps, anims, glides;
+    float err[PC_MAX];
+} g_pc;
+
+static int cmp_f(const void *a, const void *b) {
+    float x = *(const float *)a, y = *(const float *)b;
+    return x < y ? -1 : x > y;
+}
+
+static void puppetcheck_turn(void) {
+    if (!g_pc.on) return;
+    static NetPuppet pp[NET_MAX_PLAYERS];
+    int n = net_puppets(pp, NET_MAX_PLAYERS), found = 0;
+    for (int i = 0; i < n; i++) {
+        if (pp[i].id != g_pc.id) continue;
+        uint64_t delay = 0, t = net_test_puppet_render(g_pc.id, &delay);
+        if (!t) break;
+        found = 1;
+        bot_path_pt pt;
+        bot_path_at((double)t / 1e6, g_pc.c[0], g_pc.c[1], g_pc.c[2], &pt);
+        /* the tour's fall is a deliberate 30 m/s move; its corners are left in */
+        double dx = pp[i].pos[0] - pt.p[0], dy = pp[i].pos[1] - pt.p[1], dz = pp[i].pos[2] - pt.p[2];
+        if (g_pc.n < PC_MAX) g_pc.err[g_pc.n++] = (float)sqrt(dx * dx + dy * dy + dz * dz);
+        g_pc.delay_sum += delay;
+        if (pp[i].nanim == 1 && pp[i].anim[0].anim == 0x100u + (uint32_t)pt.piece) g_pc.anims++;
+        if (pp[i].gliding) g_pc.glides++;
+    }
+    if (!found) g_pc.gaps++;
+    if (plat_now_ns() < g_pc.until) return;
+    g_pc.on = 0;
+    qsort(g_pc.err, (size_t)g_pc.n, sizeof g_pc.err[0], cmp_f);
+    float p50 = g_pc.n ? g_pc.err[g_pc.n / 2] : -1, p95 = g_pc.n ? g_pc.err[(g_pc.n * 95) / 100] : -1;
+    float mx = g_pc.n ? g_pc.err[g_pc.n - 1] : -1;
+    printf("{\"ev\":\"puppetcheck\",\"n\":%d,\"p50\":%g,\"p95\":%g,\"max\":%g,\"delay_ms\":%g,\"gaps\":%d,"
+           "\"anims\":%d,\"glides\":%d}\n", g_pc.n, p50, p95, mx, g_pc.n ? (double)g_pc.delay_sum / g_pc.n / 1000.0 : 0.0,
+           g_pc.gaps, g_pc.anims, g_pc.glides);
+}
+
 static int run(char *line) {
     char cmd[32] = "", a[128] = "", b[128] = "";
     sscanf(line, "%31s %127s %127s", cmd, a, b);
@@ -298,6 +352,32 @@ static int run(char *line) {
         net_test_drop();
     } else if (!strcmp(cmd, "dump")) {
         dump();
+    } else if (!strcmp(cmd, "self")) {
+        NetSelf s;
+        memset(&s, 0, sizeof s);
+        float yaw = 0;
+        int inw = 1;
+        sscanf(line, "%*s %f %f %f %f %d", &s.pos[0], &s.pos[1], &s.pos[2], &yaw, &inw);
+        s.in_world = inw;
+        s.rot[1] = sinf(yaw / 2), s.rot[3] = cosf(yaw / 2);
+        net_set_self(&s);
+    } else if (!strcmp(cmd, "puppets")) {
+        static NetPuppet pp[NET_MAX_PLAYERS];
+        int n = net_puppets(pp, NET_MAX_PLAYERS);
+        printf("{\"ev\":\"puppets\",\"list\":[");
+        for (int i = 0; i < n; i++) {
+            printf("%s{\"id\":%u,\"name\":", i ? "," : "", pp[i].id);
+            js(pp[i].name);
+            printf(",\"zelda\":%u,\"pos\":[%g,%g,%g],\"yaw\":%g,\"alpha\":%g,\"nanim\":%d,\"anim\":%u,\"gliding\":%u}",
+                   pp[i].zelda, pp[i].pos[0], pp[i].pos[1], pp[i].pos[2], pp[i].yaw, pp[i].alpha, pp[i].nanim,
+                   pp[i].nanim ? pp[i].anim[0].anim : 0, pp[i].gliding);
+        }
+        printf("]}\n");
+    } else if (!strcmp(cmd, "puppetcheck")) {
+        memset(&g_pc, 0, sizeof g_pc);
+        sscanf(line, "%*s %u %lf %lf %lf %lf", &g_pc.id, &g_pc.c[0], &g_pc.c[1], &g_pc.c[2], &g_pc.seconds);
+        g_pc.until = plat_now_ns() + (uint64_t)(g_pc.seconds * 1e9);
+        g_pc.on = 1;
     }
     return 0;
 }
@@ -326,6 +406,7 @@ int main(int argc, char **argv) {
             if (quit) break;
         }
         net_tick();
+        puppetcheck_turn();
         NetEvent ev[16];
         int n;
         while ((n = net_poll_events(ev, 16)) > 0)
@@ -354,7 +435,7 @@ int main(int argc, char **argv) {
         seen = serial;
         fflush(stdout);
         if (quit) break;
-        plat_sleep_ms(10);
+        plat_sleep_ms(g_pc.on ? 5 : 10);
     }
     net_disconnect();
     plat_sleep_ms(200);   // the network thread says goodbye

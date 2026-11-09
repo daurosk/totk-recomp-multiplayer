@@ -115,6 +115,45 @@ int net_teams(NetTeam *out, int max);
 // The local player's own state, sent to the others: where they are. Call each frame; the client rate-limits.
 void net_set_local(const char *area, const float pos[3], const char *character);
 
+// ---- puppets: the other players' bodies (the puppets add-on, docs/online-wire.md self_state and player_state)
+#define NET_ANIM_SLOTS 8
+typedef struct {
+    uint8_t layer;
+    uint32_t anim;                  // hash of the animation's name
+    float frame, rate;
+} NetAnimSlot;
+
+// The local player's body, sent to the others while in the world. pos in the game's units (metres), vel in metres a
+// second, rot a quaternion x, y, z, w.
+typedef struct {
+    int in_world;                   // 0 on the title screen, in a loading screen or a cutscene: nothing is sent
+    float pos[3], vel[3], rot[4];
+    int nanim;
+    NetAnimSlot anim[NET_ANIM_SLOTS];
+    uint8_t gliding;
+    float glide_lean;
+} NetSelf;
+// Call each frame with the local body; the client sends it about 20 times a second.
+void net_set_self(const NetSelf *self);
+
+typedef struct {
+    uint32_t id;                    // the player's id (NetPlayer.id)
+    char name[NET_NAME_MAX];
+    uint8_t zelda;                  // the account plays Zelda
+    float pos[3], vel[3], rot[4];   // smoothed, at a render time a little behind the sender
+    float yaw;                      // radians about the up axis, from rot
+    float alpha;                    // 0 to 1: fades in when the puppet appears and out before it goes
+    int nanim;
+    NetAnimSlot anim[NET_ANIM_SLOTS];   // the animation of the state in effect, frames advanced to the render time
+    uint8_t gliding;
+    float glide_lean;
+} NetPuppet;
+// The other players this game may show now; returns the count. Empty while offline or while the local player is not
+// in the world. A player shows from its first state and goes after NET_PUPPET_STALE_MS without one (out of range,
+// loading, title screen), at once when it leaves.
+#define NET_PUPPET_STALE_MS 1000
+int net_puppets(NetPuppet *out, int max);
+
 // ---- chat
 // The newest `count` lines are n lines ending at the newest; index 0 is the oldest kept (at most NET_CHAT_KEEP).
 #define NET_CHAT_KEEP 200
