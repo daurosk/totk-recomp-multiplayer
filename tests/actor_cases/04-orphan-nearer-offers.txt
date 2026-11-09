@@ -1,0 +1,14 @@
+case orphan-nearer-offers No owner: a nearer player's game gets the actor even when a farther one offered first
+player A
+player B manual
+actor Pot 0:610 Obj_Pot_A 0,0,0
+walk A 0 1 50,0,0 50,0,0
+walk B 0 1 0,0,30 0,0,30
+at 0 A join
+at 0 B join
+at 1 B offer Pot
+run 20
+expect owner Pot at 0.5 is none
+expect owner Pot at 2 is B
+expect changes Pot == 1
+expect kept orphan_nearer >= 1

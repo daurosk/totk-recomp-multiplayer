@@ -1,0 +1,27 @@
+case roam-stress The worst case, not steady play: four players each roam one village on their own for ten minutes
+# 64 shared actors on a grid in a 200 m square, every player walking alone between random points at 3 m/s, so owners
+# keep walking more than 120 m from what they run and someone else keeps coming near it: most changes are owner far
+# and are due. The bar is a ceiling that catches a regression (the first draft of the rules gave 62 a minute here); the
+# brief's bar for steady play is cases 23 and 24's.
+player A
+player B
+player C
+player D
+grid Npc Npc_Village_A -90,-90 60,60 4,2 3000
+grid Box Obj_Box_A -80,-40 25,25 8,4 3100
+grid Apple Item_Apple -60,40 30,30 4,2 3200
+grid Boko Enemy_Bokoblin_Junior 40,60 15,15 2,2 3300
+grid Tree Obj_TreeApple_A -100,80 50,20 4,1 3400
+grid Fish Animal_Fish_A 70,-80 10,10 2,2 3500
+wander A 0 600 -100,-100 100,100 1
+wander B 0 600 -100,-100 100,100 2
+wander C 0 600 -100,-100 100,100 3
+wander D 0 600 -100,-100 100,100 4
+at 0 A join
+at 0 B join
+at 0 C join
+at 0 D join
+run 600
+expect rate flips in 60..600 <= 20
+expect rate all in 60..600 <= 25
+expect rate flips:class=enemy in 60..600 <= 4

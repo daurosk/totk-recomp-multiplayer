@@ -1,0 +1,60 @@
+case steady-together Steady co-op play: four players explore together for ten minutes; owner changes stay under 5 a minute for the room
+# The brief's bar for steady play. A wanders a 560 m square between random points at 3 m/s, resting 2 to 10 s at each;
+# the others walk a few metres off A and a second or two behind. 113 shared actors of every common kind; townspeople,
+# enemies and fish move about their spots.
+player A
+player B
+player C
+player D
+grid Npc Npc_Village_A -240,-120 80,80 6,3 3000
+grid Box Obj_Box_A -270,-210 70,70 8,6 3100
+grid Apple Item_Apple -200,150 90,40 5,2 3200
+grid Boko Enemy_Bokoblin_Junior -200,-200 200,200 3,3 3300
+grid Tree Obj_TreeApple_A -260,250 130,30 5,1 3400
+grid Fish Animal_Fish_A 150,-260 12,12 3,2 3500
+wander Npc0 0 600 -250,-130 -230,-110 10
+wander Npc1 0 600 -170,-130 -150,-110 11
+wander Npc2 0 600 -90,-130 -70,-110 12
+wander Npc3 0 600 -10,-130 10,-110 13
+wander Npc4 0 600 70,-130 90,-110 14
+wander Npc5 0 600 150,-130 170,-110 15
+wander Npc6 0 600 -250,-50 -230,-30 16
+wander Npc7 0 600 -170,-50 -150,-30 17
+wander Npc8 0 600 -90,-50 -70,-30 18
+wander Npc9 0 600 -10,-50 10,-30 19
+wander Npc10 0 600 70,-50 90,-30 20
+wander Npc11 0 600 150,-50 170,-30 21
+wander Npc12 0 600 -250,30 -230,50 22
+wander Npc13 0 600 -170,30 -150,50 23
+wander Npc14 0 600 -90,30 -70,50 24
+wander Npc15 0 600 -10,30 10,50 25
+wander Npc16 0 600 70,30 90,50 26
+wander Npc17 0 600 150,30 170,50 27
+wander Boko0 0 600 -208,-208 -192,-192 60
+wander Boko1 0 600 -8,-208 8,-192 61
+wander Boko2 0 600 192,-208 208,-192 62
+wander Boko3 0 600 -208,-8 -192,8 63
+wander Boko4 0 600 -8,-8 8,8 64
+wander Boko5 0 600 192,-8 208,8 65
+wander Boko6 0 600 -208,192 -192,208 66
+wander Boko7 0 600 -8,192 8,208 67
+wander Boko8 0 600 192,192 208,208 68
+wander Fish0 0 600 145,-265 180,-245 90
+wander Fish1 0 600 145,-265 180,-245 91
+wander Fish2 0 600 145,-265 180,-245 92
+wander Fish3 0 600 145,-265 180,-245 93
+wander Fish4 0 600 145,-265 180,-245 94
+wander Fish5 0 600 145,-265 180,-245 95
+wander A 0 600 -280,-280 280,280 7
+follow B A 4,3 1
+follow C A -5,2 2
+follow D A 2,-6 1.5
+at 0 A join
+at 0 B join
+at 0 C join
+at 0 D join
+run 600
+# The bar counts flips, as the old port's rounds did; every change is printed too.
+expect rate flips in 60..600 < 5
+expect rate flips:class=enemy in 60..600 <= 2
+expect rate all in 60..600 <= 30

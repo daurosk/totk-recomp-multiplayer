@@ -236,7 +236,118 @@ never granted. New add-ons take new bits and new message numbers in a later vers
 | 64 | `sky` | `sky` `sky_set` |
 | 128 | `emotes` | `emote` `emoted` |
 
-The add-ons' behaviour is set when each is built; until then their entries in section 12 fix only the layout.
+The add-ons' behaviour is set when each is built; until then their entries in section 12 fix only the layout. The
+actors add-on's is below (9.1); it adds no message or field to version 1, only the rules both ends follow.
+
+### 9.1 The actors add-on
+
+Rules for `offer` to `taken` (0x0400 to 0x040E), `herd` aside: its leader rule is the wildlife work's and is not
+described here yet, past its numbering below. The server's side is `server/sv_actors.c` (records, interest,
+relays) and `server/sv_owner.c` (the owner rules); `tests/actor_lab.py` replays the cases that set them.
+
+**The class table.** `online/proto/classes.txt` says what is shared: per actor-name pattern its class (`OW_CLASS_*`),
+how its id is formed, its components and its owner rules (the file's header gives the format). Both ends compile the
+same table: `tools/gen_classes.py` writes it into `online/proto/ow_classes_data.h`, `ow_classes.c` reads it
+(`ow_class_find`), and `tests/net_proto_check.py` fails when the two files differ. A row is a name prefix or `*TEXT`, a name
+containing TEXT; a matching `*TEXT` row decides before any prefix row, and among rows of one kind the longest pattern
+decides. A name no row matches, or one whose row is `local`, is not shared: the game keeps its own and never offers
+it, and the server ignores an offer or spawn of it. The table's class wins over the class a message names.
+
+**Hashes and cells.** Every name hash on the wire (`herd_row.name_hash`, `anim_slot.anim`, the `gear` component) is
+FNV-1a 32 over the name's UTF-8 bytes without the terminating NUL (`ow_name_hash`). `herd.cell` is the 250 m grid:
+column `floor(x / 250)` in the low 16 bits and row `floor(z / 250)` in the high 16 bits, each a signed 16-bit number
+(`ow_herd_cell`); it is a label only, not the map section of `place`.
+
+**Ids.** A placed actor is `origin` 0 and `serial` its map instance id, the same in every game; map ids are unique
+within a scene only, so the server reads a placed id in the scene of the game that sends it (a shrine's ids are not
+the field's). A run-time actor is
+`origin` the creating account and `serial` that game's counter, which starts at the session's `admit.server_time_us`
+and goes up by one per actor, so it is not reused, not even across a reconnect. The server refuses a run-time id whose
+origin is not the sender, and a placed id for a row whose identity is `creator` only.
+
+**Records.** The server keeps one record per shared actor: id, class, name, scene (the scene of the game that first
+offered or spawned it), owner (an account, or 0 for none), owner epoch, the last state and its time, the games that have
+it loaded, and the time of its last owner change. The epoch is 0 before the first owner and goes up at every change, to an
+owner or to none. It never goes back for an id, even when the server drops a record nobody has loaded and makes it
+again later (the server counts epochs for the whole room); a spawn starts at 1. Anything about an actor that names an
+older epoch than the newest one seen is dropped, on both ends.
+
+**Interest.** A game is in an actor's interest while its player is in the actor's scene and within
+`rules.interest_m` (250 m) of the actor; it leaves the interest only 20 m further out, so a player on the edge does not
+flicker. Games in interest receive `owner`, `actor_recv`, `spawned` and `gone` for the actor; other games receive
+nothing about it. A player's scene is its last `area`; its position the newest of its `position` and `self_state`.
+
+**What a game sends.**
+
+- `offer` once, when the actor is loaded and running in its game and the table shares it, and again after it loaded the
+  actor anew. An offer says "I have it and can run it". The server keeps the game among the actor's *candidates* until
+  the game sends `gone` with `OW_GONE_UNLOADED` or leaves, and decides by the rules below, now or later, whether it
+  gets the actor. A game does not repeat an offer to ask again.
+- `actor_send` for every actor it owns, at least every 250 ms each, still ones included, under the epoch the server
+  gave it. States from a game that is not the owner, or under another epoch, are dropped.
+- `release` when it owns an actor it can no longer run. `gone` with `OW_GONE_UNLOADED` when it unloads an actor it
+  offered or was told about; from the owner that is a release too.
+- `gone` with `OW_GONE_REMOVED`, `OW_GONE_KILLED` or `OW_GONE_TAKEN` only as the owner: the actor no longer exists
+  anywhere. From any other game these are dropped: a copy does not die by itself, its owner's state or `gone` ends it.
+- `hold` when its player begins or ends an exclusive hold: Ultrahand, carrying, riding.
+- `hit` for every hit its player lands on a copy, with the epoch it knows.
+- `spawn` for a run-time actor its game created and the table shares, once it has an id. A spawn whose `parent` is a
+  record another game owns is a copy's doing (a copy's summons or drop) and is refused: the server answers the creator
+  with `gone` `OW_GONE_REMOVED`, and the creator removes its actor.
+- `group` as the owner of the members, when its game glues actors into one structure or comes apart; an empty list ends
+  the group. The server keeps the members it has records of.
+
+**What the server sends.** `owner` to every game in interest whenever the owner changes, with the new epoch, the cause
+and the last state it has, so the new owner seeds its actor from it before it runs it and the others turn theirs into
+copies at the same epoch. `owner` 0 means nobody runs it: every game shows it still. A game that comes into an
+actor's interest gets its current `owner` once. `hold_ms` is how long the actor stays with this owner at least, unless
+the owner leaves or a player holds it. `actor_recv` relays each owner's states to the games in interest, `hit_in`
+takes a hit to the owner with the attacker's account, `spawned` and `gone` tell the games in interest.
+
+**The owner rules.** Distances run from a player's position to the actor's last position (for a group, its centre). A
+player is *present* while its game is connected and its place is `OW_PLACE_PLAYING`. The numbers are the ones
+the old port's rounds settled (its S1 rules); `server/sv_owner.h` names each.
+
+| # | Rule | Cause |
+|---|---|---|
+| 1 | **No owner.** The nearest candidate gets it when its player is within 120 m and no other present player is 5 m nearer. A nearer player whose game has not offered within 3 s stops holding it back, and one whose game has just released or unloaded it never does. Otherwise the actor stays without an owner until a near game offers. | `OFFER` |
+| 2 | **Owner far.** When the owner's player is over 120 m away, a candidate within 120 m that is 10 m nearer takes it, but only 5 s after the actor's last change. | `FAR` |
+| 3 | **Clearly closer.** A candidate whose player is at most half the owner's distance away and 15 m nearer takes it, but only 20 s after the actor's last change, wherever the players are. | `CLOSER` |
+| 4 | **Pick-up.** For items, world objects and devices: a candidate whose player is within 3 m, with the owner's player further away, takes it at once; when both players are within 20 m it waits the same 20 s. | `PICKUP` |
+| 5 | **Still things keep their owner.** An actor that has not moved 1 m in the last 5 s does not change owner by rule 3, whatever its class: who runs it matters once a player touches it, and a touch moves it by rule 4 or a fight by rule 7. A thing that does not act by itself (items, world and map objects, devices, rows marked `still`) does not change by rule 2 either while it lies still; an enemy may stand still only because its far owner's game no longer runs it, so rule 2 still applies to it. | |
+| 6 | **Asleep.** An actor whose owner's last state has `OW_POSE_ASLEEP` does not change owner by rules 2 or 3. | |
+| 7 | **Fights.** An enemy (row `fight`) hit in the last 10 s, and a boss (row `lock`) while a present player is within 120 m, stay with their owner: rules 3 and 4 do not apply, rule 2 only beyond 160 m, and an owner paused for over 6 s counts as away (rule 9). | |
+| 8 | **Followers.** A part (row `part=PREFIX`) goes to the owner of the nearest record within 60 m whose name starts with the prefix and that is not a part itself, and follows it on every change; a hit on a part counts as one on its body for rule 7. A held object (row `held`) within 12 m of an enemy or boss goes to that one's owner, unless a player holds it. A spawn whose parent is a record follows the parent's owner (summons). A row marked `fixed` (projectiles) never changes owner. A row marked `quest`, once owned, moves only by rules 9 and 10. | the leader's |
+| 9 | **The owner leaving.** An owner that is away (loading, dead, on the title, or its connection lost and held; paused, after 6 s) frees its actors for rule 1 at once. Until a candidate qualifies they stay with it, so a quick reconnect finds them. An owner that is playing but has sent no state of an actor for 2 s has stopped running it, and gives it up as by `release`. When its session ends for good, each actor it owned goes by rule 1, or to owner 0. | `LEFT` |
+| 10 | **Holds.** `hold` on takes the actor, and its whole group, for the holder at once and at any distance, unless another game holds it: then the asker gets `owner` restating the holder, and lets go. While held, no other rule moves it. When the hold ends the actor stays with the holder 5 s at least. | `HOLD` |
+| 11 | **Groups.** A group (from `group`, or for rows marked `cluster` the actors within 6 m of one another, chained, when one is a `core` row or two have moved 1 m since the server first saw them) is decided as one record at its centre, by the same rules, and its members change together. | the group's |
+
+The server tries the rules for each actor once a second and on every offer, release, hold and leave, in this order:
+holds, the owner leaving, followers, then 1 to 4 limited by 5 to 7. Rules 2 to 4 need the candidate to have offered
+the actor, so a game never gets one it cannot run. In steady play the rules keep owner changes by rules 2 to 4 under 5
+a minute for the whole room, which `tests/actor_lab.py` measures (cases 23 and 24); changes as actors come into range
+(rule 1) and as owners leave or unload them (rule 9) are counted apart, as the old port's rounds counted them.
+
+**Budgets.** A game may send 2000 actor frames at once and then 400 a second, apart from the room's frame budget,
+since loading a busy place offers hundreds of actors at once; past that it is cut off as a flood. At most 16384 records
+exist at once; offers and spawns past that are ignored.
+
+**Hits.** The server passes a `hit` to the owner as `hit_in` when the target is a record under that epoch, its owner is
+another game and the hitter's player is within 80 m of it; otherwise the hit is dropped, and so is a hit on an actor
+with no owner. At most 120 hits in 5 s from one game.
+
+**Spawns and gone.** A spawned actor's record starts owned by its creator at epoch 1, and `spawned` goes to the other
+games in interest. The creator gets no `owner` for it: it owns the actor from its `spawn` on, and an `owner` follows
+only a hand-over. A drop is such an actor (class `item`, `parent` what made it).
+
+**Take-once.** For a row marked `take`, a game whose player picks the thing up sends `take` with the epoch it knows,
+and does not add it to its pouch yet. The first `take` of a record the server has wins: the taker's game gets `taken`
+with `yours` 1 and adds it, the other games in interest get `taken` with `yours` 0 and remove their copy, and the
+record goes (as `gone` `OW_GONE_TAKEN`, which the server does not send again). A later `take` of the same thing, or
+one of an id the server has no record of, gets `taken` with the first taker and `yours` 0, so its game leaves the
+thing alone. A taken id is remembered for 10 minutes. A record goes when its owner sends `gone`, when
+the last game that has it loaded unloads it and it has no owner, and for a run-time actor when its creator's session
+ends and nobody else has it loaded.
 
 ## 10. Versions
 

@@ -209,6 +209,12 @@ def main():
         ok &= not errors
         print(f'tables: {count} entries; docs/online-wire.md {"agrees" if not errors else "differs"}')
 
+        # The class table of the actors add-on is compiled in as text: the header must be the text as it stands.
+        p = subprocess.run([sys.executable, str(ROOT / 'tools' / 'gen_classes.py'), '--check'], capture_output=True,
+                           text=True)
+        print(p.stdout.strip() or p.stderr.strip())
+        ok &= p.returncode == 0
+
         for exe, name in ((fast, 'optimised'), (checked, 'checked')):
             for s in (1, seed):
                 rc, out, err = run(exe, ['check', str(s), str(args.per_type)], env, 1800)

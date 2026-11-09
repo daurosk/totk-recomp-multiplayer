@@ -1,0 +1,15 @@
+case take-once Two players take the same apple in the same moment: the first take wins, the other game removes its copy
+player A
+player B
+actor Apple 0:1901 Item_Apple 0,0,0
+walk A 0 1 1,0,0 1,0,0
+walk B 0 1 -1,0,0 -1,0,0
+at 0 A join
+at 0 B join
+at 5 A take Apple
+at 5 B take Apple
+at 8 B take Apple
+run 15
+expect got A taken_yours == 1
+expect got B taken_yours == 0
+expect got B taken_not >= 2
