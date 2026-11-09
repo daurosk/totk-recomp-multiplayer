@@ -1,0 +1,78 @@
+name: Release
+
+# Builds the server downloads on a Linux and a Windows runner and puts them in a DRAFT GitHub release. Nothing here
+# publishes: a person reads the draft, adds the player setup (docs/releasing.md) and publishes it by hand.
+# The player setup is not built here: it needs a lifted copy of the game (the runtime library includes the generated
+# layout.h), and game files never go to CI.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  server-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python tools/make_server_release.py --out build/server-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-linux
+          path: build/server-release/TotKMP-Server-*-linux.tar.gz
+          if-no-files-found: error
+
+  server-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # tools/build_server.py looks for MSYS2 UCRT64 Clang in C:\msys64, where the runner has MSYS2 already
+      - uses: msys2/setup-msys2@v2
+        with:
+          release: false
+          msystem: UCRT64
+          update: false
+          install: mingw-w64-ucrt-x86_64-clang
+      - run: python tools/make_server_release.py --out build/server-release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-windows
+          path: build/server-release/TotKMP-Server-*-windows.zip
+          if-no-files-found: error
+
+  draft:
+    needs: [server-linux, server-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(cat MP_VERSION)"
+          tag="v${version}"
+          (cd dist && sha256sum TotKMP-Server-* > SHA256SUMS-server.txt)
+          ls -l dist
+          if gh release view "$tag" >/dev/null 2>&1; then
+            if [ "$(gh release view "$tag" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "release $tag is already published; this workflow only touches drafts" >&2
+              exit 1
+            fi
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --draft --target "$GITHUB_SHA" \
+              --title "TotK Recomp Multiplayer ${version}" --notes-file "release-notes/${version}.md"
+          fi

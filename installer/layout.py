@@ -191,3 +191,41 @@ def find(root=None):
     """The layout of root (default: the folder above this package)."""
     root = Path(root or Path(__file__).resolve().parent.parent).resolve()
     return release_layout(root) if is_release(root) else dev_layout(root)
+
+
+# ---- the product ------------------------------------------------------------------------------------------------
+
+NAME = 'TotK Recomp Multiplayer'
+# Recorded in totk-install.json. A folder whose state names no product was built by TotK Recomp itself, and this setup
+# never rewrites it (steps.py, Check).
+PRODUCT = 'totk-recomp-multiplayer'
+
+
+def versions(root=None):
+    """(multiplayer version, TotK Recomp version) of a release folder or repository: MP_VERSION and VERSION, the latter
+    without the build metadata after '+' (the commit). '0' stands for a missing file."""
+    root = Path(root or Path(__file__).resolve().parent.parent)
+
+    def read(name):
+        try:
+            return (root / name).read_text(encoding='utf-8').strip().split('+')[0] or '0'
+        except OSError:
+            return '0'
+    return read('MP_VERSION'), read('VERSION')
+
+
+def default_dest():
+    """The install folder the window offers first: TotK Recomp Multiplayer in the user's home, beside nothing of an
+    earlier TotK Recomp install."""
+    return Path.home() / NAME
+
+
+def version_text(root=None):
+    """0.1.0 (TotK Recomp 0.3.13): what the setup window shows beside its title."""
+    mp, base = versions(root)
+    return f'{mp} (TotK Recomp {base})'
+
+
+def product_line(root=None):
+    """TotK Recomp Multiplayer 0.1.0 (TotK Recomp 0.3.13)"""
+    return f'{NAME} {version_text(root)}'

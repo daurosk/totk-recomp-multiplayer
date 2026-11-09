@@ -612,14 +612,42 @@ static uint64_t g_buttons_last;   // the merged buttons of the last poll (input_
 
 // The pad chord that opens the online wheel menu (ui/online_wheel.cpp): while all its buttons are held the game
 // sees none of them. mask 0 (online play off) lets everything through.
+// A chord of one button (the default, D-pad down) also has to be held for hold_ms before it counts as held, and the
+// game must still get that button's normal use: it is kept back while the hold is pending, and when it is let go
+// before hold_ms the game gets a press and a release of it (WHEEL_TAP_NS long) instead. A longer chord opens at once.
+#define WHEEL_TAP_NS 80000000ull
 static uint64_t g_wheel_mask;
+static int g_wheel_hold_ms;
 static int g_wheel_held;
-void input_wheel_chord(uint64_t mask) { __atomic_store_n(&g_wheel_mask, mask, __ATOMIC_RELAXED); }
+void input_wheel_chord(uint64_t mask, int hold_ms) {
+    __atomic_store_n(&g_wheel_hold_ms, hold_ms, __ATOMIC_RELAXED);
+    __atomic_store_n(&g_wheel_mask, mask, __ATOMIC_RELAXED);
+}
 int input_wheel_held(void) { return __atomic_load_n(&g_wheel_held, __ATOMIC_RELAXED); }
 static void wheel_gate(uint64_t *b) {
+    static uint64_t since, tap_until;
+    static int fired;
+    uint64_t now_ns = plat_now_ns();
     uint64_t m = __atomic_load_n(&g_wheel_mask, __ATOMIC_RELAXED);
-    int held = m && (*b & m) == m;
-    if (held) *b &= ~m;
+    int hold_ms = __atomic_load_n(&g_wheel_hold_ms, __ATOMIC_RELAXED);
+    int delayed = m && (m & (m - 1)) == 0 && hold_ms > 0;
+    int held = 0;
+    if (m && (*b & m) == m) {
+        *b &= ~m;
+        tap_until = 0;
+        if (!delayed) held = 1;
+        else {
+            if (!since) since = now_ns;
+            if (fired || now_ns - since >= (uint64_t)hold_ms * 1000000ull) fired = held = 1;
+        }
+    } else {
+        if (delayed && since && !fired) tap_until = now_ns + WHEEL_TAP_NS;   // a short press: the game gets it now
+        since = 0, fired = 0;
+    }
+    if (m && tap_until) {
+        if (now_ns < tap_until) *b |= m;
+        else tap_until = 0;
+    }
     __atomic_store_n(&g_wheel_held, held, __ATOMIC_RELAXED);
 }
 

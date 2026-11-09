@@ -1,5 +1,5 @@
-// The wheel menu: a radial menu opened by holding the wheel key (default V) or the pad chord (default Minus + left
-// stick click). Four top-level slices at most (Teleport, Chat, Team, Host); each opens one ring below it; a ring that
+// The wheel menu: a radial menu opened by holding the wheel key (default V) or the pad button (default D-pad down, held 0.35 s)
+// Four top-level slices at most (Teleport, Chat, Team, Host); each opens one ring below it; a ring that
 // needs a person lists the players as a chooser. The game gets no input while it is open (online_modal_set).
 // Choosing: the stick or the mouse aims, the number keys aim at slice 1..n, releasing the hold key picks, A / Enter /
 // a click picks at once, Esc / B / a right click goes back. A ring that was opened by releasing stays open
@@ -181,8 +181,9 @@ static uint64_t parse_chord(const char *s) {
 
 void online_wheel_pad_chord_changed(void) {
     const char *v = cfg_get("TOTK_NET_PAD_WHEEL");
-    uint64_t m = v && *v ? (strcmp(v, "none") ? parse_chord(v) : 0) : parse_chord("minus+lstick");
-    input_wheel_chord(m);
+    uint64_t m = v && *v ? (strcmp(v, "none") ? parse_chord(v) : 0) : parse_chord("down");
+    const char *h = cfg_get("TOTK_NET_WHEEL_HOLD_MS");
+    input_wheel_chord(m, h && *h ? atoi(h) : 350);
 }
 
 // ---- rings

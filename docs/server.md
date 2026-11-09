@@ -11,6 +11,7 @@ It needs no game files and no account anywhere. It keeps everything in one data 
 | Source | `server/` (the program), `online/proto/` (the protocol it shares with the game) |
 | Protocol | [online-wire.md](online-wire.md) |
 | Test bot | `tools/net_bot.c` |
+| Download | `TotKMP-Server-<version>-windows.zip` or `-linux.tar.gz` ([releasing.md](releasing.md)): the server, a start script, `server-data/server.toml` and this file as its README |
 | Tests | `tests/net_server_check.py` ([building.md](building.md), "Checks") |
 
 ## Build

@@ -80,7 +80,7 @@ class App:
         self.run_args = run_args or {}   # extra CLI options for tests: temp, verify
         self.log_entries = []            # events and raw lines of the run, rendered by render_log
         self.bound = []                  # (widget, option, id, params) retranslated on a language switch
-        self.vars = {n: tk.StringVar() for n in ('base', 'update', 'keys', 'firmware', 'dest')}
+        self.vars = {n: tk.StringVar() for n in ('base', 'update', 'keys', 'firmware', 'dest', 'server')}
         self.vars['lang'] = tk.StringVar()
         self.recorded = {}       # base/update paths prefilled from the recorded ones, by field
         self.touched = set()     # fields the user picked or typed
@@ -91,7 +91,7 @@ class App:
         self.screen = None
         self.fitted = None               # the (width, height) fit last gave the window
 
-        root.title(self.cat('ui.title'))
+        root.title(self.window_title())
         icon = layout.runtime / 'totk.ico'
         png = layout.runtime / 'totk.png'   # Tk loads no .ico off Windows; the Linux release converts it
         if os.name == 'nt' and icon.is_file():
@@ -113,7 +113,7 @@ class App:
         self.title = self.label(top, 'ui.title', style='Title.TLabel')
         self.title.pack(side='left')
         version = ttk.Label(top, style='Version.TLabel')
-        self.bind_text(version, 'text', 'ui.version', version=layout.release)
+        self.bind_text(version, 'text', 'ui.version', version=layouts.version_text(layout.root))
         version.pack(side='left', padx=(dpi.px(10), 0), pady=(dpi.px(6), 0))
         sw = ttk.Frame(top)
         sw.pack(side='right')
@@ -142,6 +142,8 @@ class App:
             for name in ('base', 'update', 'keys', 'firmware', 'dest'):
                 if name in last and not self.vars[name].get().strip():
                     self.set_prefill(name, last[name])
+            if not self.vars['dest'].get().strip():
+                self.set_prefill('dest', str(layouts.default_dest()))
 
     # ---- text -----------------------------------------------------------------------------------------------------
 
@@ -159,8 +161,11 @@ class App:
         self.bind_text(w, 'text', id)
         return w
 
+    def window_title(self):
+        return f"{self.cat('ui.title')} {layouts.version_text(self.layout.root)}"
+
     def retext(self):
-        self.root.title(self.cat('ui.title'))
+        self.root.title(self.window_title())
         for widget, option, id, params in self.bound:
             widget.configure(**{option: self.cat(id, **params)})
         self.fill_languages()
@@ -273,6 +278,12 @@ class App:
         self.bind_text(dlss, 'text', 'ui.dlss')
         dlss.pack(anchor='w', pady=(dpi.px(8), 0))
         self.label(f, 'ui.dlss_help', wraplength=WRAP, justify='left').pack(anchor='w', padx=(dpi.px(22), 0))
+        # Optional: written to totk.ini ([online] net_address) by the last step
+        srv = ttk.Frame(f)
+        srv.pack(fill='x', pady=(dpi.px(8), 0))
+        self.label(srv, 'ui.server').pack(side='left', padx=(0, dpi.px(10)))
+        ttk.Entry(srv, textvariable=self.vars['server']).pack(side='left', fill='x', expand=True)
+        self.label(f, 'ui.server_help', wraplength=WRAP, justify='left').pack(anchor='w')
         self.update_hint = ttk.Label(f, wraplength=WRAP, justify='left')
         self.update_hint.pack(anchor='w', pady=(dpi.px(8), 0))
         self.form_error = ttk.Label(f, style='Err.TLabel', wraplength=WRAP, justify='left')
@@ -344,7 +355,7 @@ class App:
     def form(self):
         return Form(base=self.vars['base'].get(), update=self.vars['update'].get(), keys=self.vars['keys'].get(),
                     firmware=self.vars['firmware'].get(), lang=self.selected_lang(), dest=self.vars['dest'].get(),
-                    dlss=self.dlss_var.get())
+                    dlss=self.dlss_var.get(), server=self.vars['server'].get())
 
     def set_prefill(self, name, value):
         self.programmatic = True

@@ -21,12 +21,14 @@ _ROOT = Path(__file__).resolve().parents[1]
 
 
 def _credit_file(path: Path) -> bool:
-    """True for a file at the repository root that may credit another project by name (foreign_code.CREDIT_FILES)."""
+    """True for a file that may credit another project by name: one of foreign_code.CREDIT_FILES, or inside one of its
+    folders."""
     try:
         rel = (path if path.is_absolute() else Path.cwd() / path).resolve().relative_to(_ROOT)
     except ValueError:
         return False
-    return rel.as_posix() in foreign_code.CREDIT_FILES
+    name = rel.as_posix()
+    return any(name == c or (c.endswith("/") and name.startswith(c)) for c in foreign_code.CREDIT_FILES)
 
 
 # Switch containers, executables and game data formats.

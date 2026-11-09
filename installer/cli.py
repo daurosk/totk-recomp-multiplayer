@@ -1,5 +1,5 @@
 """Command line: python -m installer --base FILE --update FILE --keys FILE --lang CODE --dest DIR [--firmware DIR]
-                                     [--root DIR] [--temp DIR] [--verify] [--dlss]
+                                     [--root DIR] [--temp DIR] [--verify] [--dlss] [--server HOST:PORT]
 
 A first install needs every option. --firmware names the Switch firmware folder (an unpacked firmware or an emulator's
 Contents/registered); the setup extracts the system shared fonts from it when the language is Chinese, Korean or
@@ -10,6 +10,9 @@ line, 3 cancelled (Ctrl+C or Ctrl+Break).
 
 --dlss downloads NVIDIA's DLSS library (nvngx_dlss.dll) from NVIDIA's DLSS SDK repository into the install folder on
 Windows with an NVIDIA RTX GPU (steps.py, Dlss).
+
+--server HOST:PORT writes the multiplayer server to join into totk.ini ([online] net_address, with net_autoconnect = 1);
+the Cleanup step does it (ini.py). Without it the file keeps what it has.
 """
 import argparse
 import hashlib
@@ -18,6 +21,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import ini
 from . import layout as layouts
 from . import state as statefile
 from .events import Reporter
@@ -63,7 +67,10 @@ def main(argv=None):
     ap.add_argument('--verify', action='store_true', help='hash every kept file, also those this release made')
     ap.add_argument('--dlss', action='store_true', help="download NVIDIA's nvngx_dlss.dll (NVIDIA RTX SDK license) next "
                                                       'to the game, for dlaa and the DLSS modes')
+    ap.add_argument('--server', help='multiplayer server to join, host:port: written to totk.ini')
     args = ap.parse_args(argv)
+    if args.server is not None and not ini.valid_address(args.server):
+        ap.error(f'--server {args.server!r} is not host:port')
 
     # The window cancels with Ctrl+Break to the installer's process group (CREATE_NEW_PROCESS_GROUP), which also reaches
     # the tools it runs; Python's default for it ends the process without recording anything.

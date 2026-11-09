@@ -32,7 +32,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: The title line of the settings menu (F1), for example "TotK Recomp 0.1.0, game 1.4.3". For the installer, the version of TotK-Setup.
+      description: The title line of the settings menu (F1), for example "TotK Recomp 0.1.0, game 1.4.3". For the installer, the version of TotKMP-Setup.
     validations:
       required: true
   - type: input
@@ -84,7 +84,7 @@ body:
 
         **Controls, game logic, anything you can trigger again.** Turn on Input recording (F1, Advanced tab, Diagnostics), restart the game, load a save, make the bug happen and close the game. Attach `input-record.txt` from the logs folder and a zip of the save you loaded: the `profile` folder next to `totk.exe`. The recording replays what you did, so we can see the bug on our machine.
 
-        **Installer.** Attach the newest `install-*.log` from `temp\logs` in the folder of `TotK-Setup.exe` (on Linux: `.setup-temp/logs` in the install folder), and the log file the error message names.
+        **Installer.** Attach the newest `install-*.log` from `temp\logs` in the folder of `TotKMP-Setup.exe` (on Linux: `.setup-temp/logs` in the install folder), and the log file the error message names.
   - type: textarea
     id: log
     attributes:

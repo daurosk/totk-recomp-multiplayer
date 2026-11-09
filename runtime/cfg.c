@@ -170,7 +170,7 @@ static const CfgMeta metas[] = {
     // Online play (ui/online_ui.cpp, net/net_client.h)
     {"NET_NAME", "Player", NULL, LIVE}, {"NET_ADDRESS", "", NULL, LIVE}, {"NET_PASSWORD", "", NULL, LIVE}, {"NET_AUTOCONNECT", "0", "0|1", LIVE},
     {"NET_KEY_CHAT", "enter", NULL, LIVE}, {"NET_KEY_WHEEL", "v", NULL, LIVE}, {"NET_KEY_LIST", "p", NULL, LIVE},
-    {"NET_KEY_ACCEPT", "y", NULL, LIVE}, {"NET_KEY_REFUSE", "n", NULL, LIVE}, {"NET_PAD_WHEEL", "minus+lstick", NULL, LIVE},
+    {"NET_KEY_ACCEPT", "y", NULL, LIVE}, {"NET_KEY_REFUSE", "n", NULL, LIVE}, {"NET_PAD_WHEEL", "down", NULL, LIVE}, {"NET_WHEEL_HOLD_MS", "350", "0..2000", LIVE},
     {"NET_WHEEL_SCALE", "100", "60..150", LIVE}, {"NET_CHAT_FADE", "10", "3..30", LIVE}, {"NET_CHAT_LINES", "10", "4..30", LIVE},
     {"NET_FAKE", "0", "0|1", RESTART}, {"NET_FAKE_ROLE", "host", "player|mod|host", RESTART},
     // Advanced: scheduling

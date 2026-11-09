@@ -59,11 +59,13 @@ Hold the wheel key to open it, aim, let go to choose.
 | Input | Default |
 |---|---|
 | Keyboard and mouse | hold **V** |
-| Controller | hold **Minus + left stick click** together |
+| Controller | hold **D-pad down** for 0.35 s |
 
-Neither is used by the game ([controls.md](controls.md)): V is unbound, and the game sees none of the pad chord's buttons
-while both are held. Both are rebindable in the Online tab or `totk.ini` (`net_key_wheel`, `net_pad_wheel`). While the
-wheel is open the game gets no input.
+V is unbound in the game ([controls.md](controls.md)). D-pad down keeps its normal use: the game does not see it while
+it is held, and a press let go within the hold time (0.35 s, `net_wheel_hold_ms`) reaches the game afterwards as a quick
+press and release. Once the wheel is open the game gets no input at all. A chord of several buttons (for example
+`minus+lstick`) opens at once, without the hold time. Both are rebindable in the Online tab, which also has the hold
+time, or in `totk.ini` (`net_key_wheel`, `net_pad_wheel`).
 
 - Aim with the left stick, the mouse, or the number keys 1 to 4. Let go of the key to choose.
 - A, Enter or a click chooses at once. Esc, B or a right click goes back one ring, or closes the wheel.
@@ -113,7 +115,7 @@ velocity together. `kSlots` stays as the list of copies written, each only when 
 ## Settings
 
 Section `[online]` of `totk.ini` ([totk.ini.example](../totk.ini.example)): `net_name`, `net_address`,
-`net_autoconnect`, `net_key_chat`, `net_key_wheel`, `net_key_list`, `net_key_accept`, `net_key_refuse`, `net_pad_wheel`,
+`net_autoconnect`, `net_key_chat`, `net_key_wheel`, `net_key_list`, `net_key_accept`, `net_key_refuse`, `net_pad_wheel`, `net_wheel_hold_ms`,
 `net_wheel_scale`, `net_chat_fade`, `net_chat_lines`, `net_fake`, `net_fake_role`.
 
 ## Screenshots without input

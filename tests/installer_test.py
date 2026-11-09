@@ -427,6 +427,45 @@ class IniTest(unittest.TestCase):
             self.assertIn('vk_present = fifo', text)
             self.assertEqual(ini.get_language(text), 'ja')
 
+    def test_server_address(self):
+        for good in ('play.example.org:7777', '10.0.0.5:1', '[::1]:65535', 'host-1:80'):
+            self.assertTrue(ini.valid_address(good), good)
+        for bad in ('', 'host', 'host:0', 'host:65536', 'a b:5', 'host:port', ':5'):
+            self.assertFalse(ini.valid_address(bad), bad)
+
+    def test_write_server_sets_online_and_keeps_the_rest(self):
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            example = d / 'totk.ini.example'
+            example.write_text(self.EXAMPLE + '\n[online]\n# net_name = Player\n# net_address = play.example.org:7777\n'
+                               '# net_autoconnect = 0\n\n[other]\n# net_address = untouched\n')
+            path = ini.write(d, 'en-GB', example, server='my.host:7000')
+            text = path.read_text()
+            self.assertIn('net_address = my.host:7000\n', text)
+            self.assertIn('net_autoconnect = 1\n', text)
+            self.assertIn('# net_name = Player', text)
+            self.assertIn('# net_address = untouched', text)
+            ini.write(d, 'en-GB', example, server='other.host:1')   # a second run rewrites the active line
+            self.assertEqual(path.read_text().count('net_address = '), 2)
+            self.assertIn('net_address = other.host:1\n', path.read_text())
+            ini.write(d, 'en-GB', example)                           # no server: the file keeps what it has
+            self.assertIn('net_address = other.host:1\n', path.read_text())
+        self.assertEqual(ini.set_server('', 'h:1'), '[online]\nnet_autoconnect = 1\nnet_address = h:1\n')
+
+
+class ProductTest(unittest.TestCase):
+    """The setup is TotK Recomp Multiplayer and leaves an install of TotK Recomp itself alone."""
+
+    def test_state_names_the_product(self):
+        self.assertEqual(state.empty('1')['product'], 'totk-recomp-multiplayer')
+
+    def test_version_text_reads_both_versions(self):
+        from installer import layout
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / 'MP_VERSION').write_text('0.1.0\n')
+            (Path(d) / 'VERSION').write_text('0.3.13+abc1234\n')
+            self.assertEqual(layout.product_line(d), 'TotK Recomp Multiplayer 0.1.0 (TotK Recomp 0.3.13)')
+
 
 class CleanupTest(unittest.TestCase):
     """The real Cleanup step on a finished install whose romfs/ is intact, emptied or gone (#107)."""

@@ -1,6 +1,6 @@
 """totk-install.json in the install folder: what built it and which steps finished.
 
-    {"format": 1, "release": "...", "lang": "en-US",
+    {"format": 1, "product": "totk-recomp-multiplayer", "release": "...", "lang": "en-US",
      "inputs": {"base": {"name", "size", "sha256"}, "update": {...}},
      "steps": {"<step>": {"key": "<input fingerprint>", "release": "...", "finished": "<UTC time>", "seconds": 12.3,
                           ...the step's own fields}}}
@@ -13,6 +13,8 @@ import json
 import os
 from pathlib import Path
 
+from .layout import PRODUCT
+
 NAME = 'totk-install.json'
 FORMAT = 1
 
@@ -24,7 +26,7 @@ class StateError(Exception):
 
 
 def empty(release):
-    return {'format': FORMAT, 'release': release, 'inputs': {}, 'steps': {}}
+    return {'format': FORMAT, 'product': PRODUCT, 'release': release, 'inputs': {}, 'steps': {}}
 
 
 def load(dest):
