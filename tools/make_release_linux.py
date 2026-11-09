@@ -1,8 +1,8 @@
 """Assemble the Linux release folder of docs/installer.md ("Linux release") and pack it as an AppImage.
 
-    .venv/bin/python tools/make_release_linux.py --out build/release/TotK-Setup-linux \\
-        [--appimage build/release/TotK-Setup-x86_64.AppImage]
-    .venv/bin/python tools/make_release_linux.py --out build/release/TotK-Setup-linux --prove
+    .venv/bin/python tools/make_release_linux.py --out build/release/TotKMP-Setup-linux \\
+        [--appimage build/release]
+    .venv/bin/python tools/make_release_linux.py --out build/release/TotKMP-Setup-linux --prove
 
 The same model as the Windows release (tools/make_release.py, whose download cache, unpacking and checks this reuses): the
 folder carries the setup and a toolchain, never game code; the player's machine builds the game. Everything that runs on
@@ -433,7 +433,7 @@ exec "$HERE/python/bin/python3" -m installer.gui "$@"
 
 DESKTOP = '''[Desktop Entry]
 Type=Application
-Name=TotK Recomp Setup
+Name=TotK Recomp Multiplayer Setup
 Comment=Builds Tears of the Kingdom for this PC from your own game files
 Exec=AppRun
 Icon=totk-setup
@@ -448,6 +448,11 @@ def build_entry(out):
     (out / 'totk-setup.desktop').write_text(DESKTOP, encoding='utf-8')
     shutil.copy2(out / 'runtime' / 'totk.png', out / 'totk-setup.png')
     (out / '.DirIcon').symlink_to('totk-setup.png')
+
+
+def appimage_name():
+    """TotKMP-Setup-0.1.0-x86_64.AppImage: the multiplayer version (MP_VERSION) in the file name."""
+    return f"TotKMP-Setup-{(mr.ROOT / 'MP_VERSION').read_text(encoding='utf-8').strip()}-x86_64.AppImage"
 
 
 def write_appimage(out, path):
@@ -560,7 +565,8 @@ def prove(out, cpu='v3'):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--out', type=Path, required=True, help='release folder (replaced)')
-    ap.add_argument('--appimage', type=Path, help='also pack the folder as this AppImage')
+    ap.add_argument('--appimage', type=Path, help='also pack the folder as this AppImage; a folder (no .AppImage suffix) gets '
+                    'the name TotKMP-Setup-<MP_VERSION>-x86_64.AppImage inside it')
     ap.add_argument('--prove', action='store_true', help='only run the compile-and-probe check on an existing folder')
     ap.add_argument('--cpu', choices=('v2', 'v3'), default='v3',
                     help='--prove: build and run the check for this CPU level (default v3)')
@@ -587,7 +593,8 @@ def main():
     check_bundle(out)
     mr.sizes(out)
     if args.appimage:
-        write_appimage(out, args.appimage.resolve())
+        target = args.appimage.resolve()
+        write_appimage(out, target if target.suffix == '.AppImage' else target / appimage_name())
 
 
 if __name__ == '__main__':

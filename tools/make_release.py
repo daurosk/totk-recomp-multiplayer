@@ -1,7 +1,7 @@
 """Assemble the release folder of docs/installer.md ("Release layout") from pinned downloads.
 
-    .venv-py314\\Scripts\\python tools\\make_release.py --out build/release/TotK-Setup [--zip build/release/TotK-Setup.zip]
-    .venv-py314\\Scripts\\python tools\\make_release.py --out build/release/TotK-Setup --prove
+    .venv-py314\\Scripts\\python tools\\make_release.py --out build/release/TotKMP-Setup [--zip build/release]
+    .venv-py314\\Scripts\\python tools\\make_release.py --out build/release/TotKMP-Setup --prove
 
 Needs Python 3.14 (tarfile reads the MSYS2 .zst packages), uv on PATH and network access on the first run. Downloads are
 cached in toolchain/release-dl/ and checked against the sha256 in PINS; a mismatch stops the build. The folder holds:
@@ -17,8 +17,11 @@ cached in toolchain/release-dl/ and checked against the sha256 in PINS; a mismat
     recomp/, tools/, data/, installer/, licenses/, THIRD_PARTY_NOTICES.md, totk.ini.example
     data/pgo-<v>.profdata  build/pgo's execution profile of an update (tools/pgo.py) and its .json record: the
                install compiles that update's code and the runtime libraries with it
-    VERSION    the repository's VERSION plus the commit, 0.1.0+973c626; the installer's release string
-    TotK-Setup.exe  installer/launcher/launcher.c built with llvm/ (-mwindows): starts python/pythonw.exe -m installer.gui
+    VERSION    the repository's VERSION (the TotK Recomp release this is built on) plus the commit, 0.3.13+973c626; the
+               installer's release string
+    MP_VERSION this project's own version, 0.1.0; the setup shows "0.1.0 (TotK Recomp 0.3.13)" and the game's version line
+               "TotK Recomp Multiplayer 0.1.0 (TotK Recomp 0.3.13)"
+    TotKMP-Setup.exe  installer/launcher/launcher.c built with llvm/ (-mwindows): starts python/pythonw.exe -m installer.gui
 
 --prove compiles the generated C and links build/release-check/totk.exe with nothing but the folder's python/, llvm/,
 runtime/ and bin/ (PATH holds the Windows system directory and those), then runs the four probes there.
@@ -445,6 +448,12 @@ def build_sources(out, pgo):
     shutil.copy2(ROOT / 'totk.ini.example', out / 'totk.ini.example')
     shutil.copy2(ROOT / 'THIRD_PARTY_NOTICES.md', out / 'THIRD_PARTY_NOTICES.md')
     (out / 'VERSION').write_text(version() + '\n', encoding='utf-8')
+    shutil.copy2(ROOT / 'MP_VERSION', out / 'MP_VERSION')
+
+
+def zip_name():
+    """TotKMP-Setup-0.1.0-windows.zip: the multiplayer version (MP_VERSION) in the file name."""
+    return f"TotKMP-Setup-{(ROOT / 'MP_VERSION').read_text(encoding='utf-8').strip()}-windows.zip"
 
 
 def version():
@@ -456,7 +465,7 @@ def version():
     return (ROOT / 'VERSION').read_text(encoding='utf-8').strip() + '+' + r.stdout.strip()
 
 
-# ---- TotK-Setup.exe --------------------------------------------------------------------------------------------------
+# ---- TotKMP-Setup.exe --------------------------------------------------------------------------------------------------
 
 def c_wide(text):
     """A C wide string literal of text: ASCII as is, everything else as a universal character name."""
@@ -495,7 +504,7 @@ def build_launcher(out, llvm):
     run([llvm / 'bin' / 'llvm-windres.exe', '-I', ROOT / 'runtime', '-O', 'coff',
          ROOT / 'installer' / 'launcher' / 'launcher.rc', '-o', res], env=env)
     run([llvm / 'bin' / 'clang.exe', '-O2', '-mwindows', '-Wall', '-Wl,-s', '-I', work,
-         ROOT / 'installer' / 'launcher' / 'launcher.c', res, '-o', out / 'TotK-Setup.exe'], env=env)
+         ROOT / 'installer' / 'launcher' / 'launcher.c', res, '-o', out / 'TotKMP-Setup.exe'], env=env)
 
 
 # ---- checks ----------------------------------------------------------------------------------------------------------
@@ -585,7 +594,8 @@ def prove(out, cpu='v3'):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--out', type=Path, required=True, help='release folder (replaced)')
-    ap.add_argument('--zip', type=Path, help='also write the folder as this zip')
+    ap.add_argument('--zip', type=Path, help='also write the folder as this zip; a folder (no .zip suffix) gets '
+                                             'the name TotKMP-Setup-<MP_VERSION>-windows.zip inside it')
     ap.add_argument('--prove', action='store_true', help='only run the compile-and-probe check on an existing folder')
     ap.add_argument('--cpu', choices=('v2', 'v3'), default='v3',
                     help='--prove: build and run the check for this CPU level (default v3)')
@@ -611,7 +621,8 @@ def main():
     check_bundle(out)
     sizes(out)
     if args.zip:
-        write_zip(out, args.zip.resolve())
+        zip_path = args.zip.resolve()
+        write_zip(out, zip_path if zip_path.suffix == '.zip' else zip_path / zip_name())
 
 
 if __name__ == '__main__':

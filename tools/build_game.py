@@ -382,10 +382,16 @@ def module_glue(layout, linked, hashes, paths, version):
 
 
 def port_version():
-    """VERSION at the root: the repository's semver, or in a release folder the release string (make_release.py
-    version)."""
+    """rt_port_version, shown after "TotK Recomp " in the settings menu's version line, the log and the Discord status:
+    "Multiplayer 0.1.0 (TotK Recomp 0.3.13)". MP_VERSION is this project's own version and VERSION the TotK Recomp
+    release it is built on (a release folder's VERSION carries +commit, which is left out here). Without MP_VERSION
+    the string is VERSION as it was."""
     path = ROOT / 'VERSION'
-    return path.read_text(encoding='utf-8').strip() if path.is_file() else 'unknown'
+    base = path.read_text(encoding='utf-8').strip() if path.is_file() else 'unknown'
+    mp = ROOT / 'MP_VERSION'
+    if not mp.is_file():
+        return base
+    return f"Multiplayer {mp.read_text(encoding='utf-8').strip()} (TotK Recomp {base.split('+')[0]})"
 
 
 def ninja_file(gen, out, mods, pool_depth, skip=(), prebuilt=False, runtime_lib=None, make_lib=False, stamp=None):
