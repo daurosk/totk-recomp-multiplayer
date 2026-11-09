@@ -170,6 +170,8 @@ void nal_stats(NalStats *out) {
 
 void nal_use(const NaGame *g) { T.use = g; }
 
+const NaStats *nal_core_stats(void) { return T.w ? na_stats(T.w) : NULL; }
+
 // The core's send: encoded here, decoded again on the network thread just before it is sealed and written.
 static int send_out(void *ctx, uint16_t type, const void *msg) {
     (void)ctx;

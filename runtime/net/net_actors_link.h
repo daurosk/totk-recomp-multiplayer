@@ -48,6 +48,8 @@ typedef struct {
     int live;                                         // the core is stepping
 } NalStats;
 void nal_stats(NalStats *out);
+// The core's counters, NULL before the first grant. Game side.
+const NaStats *nal_core_stats(void);
 
 #ifdef __cplusplus
 }

@@ -11,9 +11,10 @@ to the owner and counts there; life travels in the owner's states, so it is equa
 |---|---|---|
 | Sync core: roles, epochs, offers, states, copies, hits, gone, spawn rule, wildlife leader rule | `runtime/net/net_actors.c`, `.h` | done, offline lab passes |
 | Offline lab: two invented games and a stub server, every message through the real codec | `tests/net_actors_lab.c`, `tests/net_actors_check.py` | 38 checks (and 24 of the link), built optimised and with UB traps |
-| Game side: `NaGame` over the recompiled game (scan, make a copy, drive, AI off, hit, removal) | `runtime/net_actors_game.c` | **scan only** (`na_game_scan`, read-only, 1.2.1, with position and orientation); `na_game()` is NULL until copies can be made, driven and removed |
+| Game side: `NaGame` over the recompiled game (scan, make a copy, drive, AI off, hit, removal) | `runtime/net_actors_game.c` | 1.2.1 only, behind `TOTK_ACTORS_SYNC=1` (patch set `actors_frame`, off by default): scan, drive (the game's `updateTrans` and `updateRotation`), hold (main body keyframed), removal (`requestDelete`), names for herd rows. Not yet: life, AI off, applying a forwarded hit, the damage entry, making a copy by name. See "Game calls" |
 | Link to the network thread: two queues of encoded payloads, the offer, the grant, loss and re-admit | `runtime/net/net_actors_link.c`, `.h` | done, `tests/net_actors_link_lab.c` passes |
-| Hook into `net_client.c`: offer `OW_FEAT_ACTORS`, hand 0x04xx frames to the link, send the core's messages, step each frame | `runtime/net/net_client.c` | done; inert while `na_game()` is NULL (nothing offered, nothing stepped) |
+| Hook into `net_client.c`: offer `OW_FEAT_ACTORS`, hand 0x04xx frames to the link, send the core's messages, the player's place | `runtime/net/net_client.c` | done; inert while `na_game()` is NULL (nothing offered, nothing stepped) |
+| Frame hook: the core steps on the game's own thread | `recomp/patches-v121.txt` set `actors_frame`, `runtime/net_actors_game.c` `actors_frame` | done on 1.2.1, off by default |
 
 ## The core
 
@@ -63,13 +64,40 @@ class `item` yet. `take` and `taken` are the server's (first take wins) and not 
 - Every connection end (`conn_close`) is a loss: on its next tick the game side calls `na_offline` (copies removed,
   the rest given back to the game's own AI). A new admit sets the account and serial base again and the next scan
   offers every placed actor anew.
-- `nal_tick` runs from `net_tick`, once per presented frame, with the player's position for the herd cell. That is the
-  present thread, which is right for the read-only scan; `make_copy`, `drive` and `remove` write game state and must
-  run in the game's own frame step, so the call moves there with the first adapter that writes.
+- `nal_tick` runs in the game's own frame step: the frame hook (`actors_frame`, below) calls it at most every 15 ms on
+  the first thread that runs the hook. `net_tick` (the present thread) only passes the player's position with
+  `nal_player`, which gives the herd cell.
 - Not done: the clock offset is the one from admit (one-way delay off); `nal_clock` takes a better one once the pong
   round trips are measured (the puppets branch does that for its own use).
 - The loot work handles `spawned` and `taken` of items in `net_client.c` on its own branch; when both land, those two
   types must reach both the link and the loot code.
+
+## Game calls (1.2.1)
+
+The game side calls the game's own functions, named here by the game's symbols. Their 1.2.1 main offsets come from the
+old port's binding table of game symbols (our own P13 work); each was checked in the 1.2.1 main as a function start (a
+prologue, or a first load, right after the previous function's last branch), and the manager slot of the same table,
+`engine::actor::BaseProcMgr::sInstance` at main+0x4722268, is the one our probe had found on its own.
+
+| Call | main | Used for | Checked |
+|---|---|---|---|
+| `engine::actor::BaseProc::requestDelete(proc, u32)` | 0x83aa68 | `remove`: an owner's gone takes the copy out | start; its body returns at once for a state of 7 to 11 at +0x24, the field our scan reads |
+| `engine::actor::ActorBase::updateTrans(actor, const Vector3f *, int)` | 0xe8daf0 | `drive`: the copy goes where the owner's state is (0 as the int, as our P13 code called it) | start |
+| `engine::actor::ActorBase::updateRotation(actor, const Matrix33f *, int)` | 0xe655d8 | `drive`: the copy turns; the nine floats are written in the order the scan reads them at +0x290, so a copy stands as the owner's actor whether the game means rows or columns | start |
+| `engine::actor::ActorBase::getMainRigidBodyEntity(actor)` | 0x1346e94 | `puppet` | start |
+| `phive::RigidBodyBase::requestChangeMotionType(body, u32)` | 0xe8be30 | `puppet`: 2 keyframed on a copy, 0 dynamic when this game takes it back | start; type 2 as our P13 code read a body's flags at +0x68 |
+| `engine::actor::ActorInstanceMgr::requestCreateActorSync` | 0x12a8b44 | not used yet: `make_copy` needs its `CreateArg` | start |
+
+The frame hook is a patch site in the root update (main+0xb36920): its `ldr x0, [x0, #0xa8]` at main+0xb36948 becomes a
+`bl` to the patch page +0xf60, where `actors_frame` steps the core and then does the load. A displaced write has to be
+to x0..x18: the lifted caller keeps x19..x28 in locals across a call and does not read them back. Every game call of the
+step changes registers the root update still holds (x1), so the hook saves the whole register file and puts it back
+before the load. Calls that pass a vector or a matrix put it on the guest stack below the hook's frame.
+
+What this gives without the rest: a placed map object (tree, rock, crate, barrel) that every game places itself is one
+body. The owner's states move it on every other screen (keyframed, so the copy's own physics do not fight the state),
+and the owner's gone takes it out everywhere through the game's own removal. An enemy copy is moved the same way but
+keeps its own AI until the AI switch is found, so it will twitch between its own steps and the owner's.
 
 ## Answered by the server side (docs/online-wire.md 9.1)
 
@@ -116,7 +144,7 @@ A sixth round (same save and place, 186 actors):
   own only when woken (not checked). Gameplay actors (enemies, crates, barrels, `AsbObj`) are listed out to about 145 m;
   only large town and field pieces and areas are listed beyond 200 m.
 
-Still to probe, in order: life (the scan reports `life_max` 0 until then), what wakes a tree or rock out of its merged
+Still to probe, in order (the game calls above are done): life (the scan reports `life_max` 0 until then), what wakes a tree or rock out of its merged
 actor and whether the woken actor keeps a map instance id, the auto-placement mark with wildlife about, the game's
 removal, the damage entry, creating an actor by name, the AI switch for copies, and all of it on the version the
 release ships if that is not 1.2.1.

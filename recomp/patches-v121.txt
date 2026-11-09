@@ -1078,8 +1078,8 @@ spin sdk 3d3250 3d3270   # 9 instructions; loads
 site shadow main cec22c 11001d6b @page:x11 b9405d6b 11001d6b   # add w11, w11, #7 -> adrp x11, page; ldr w11, [x11, #92]; add w11, w11, #7
 
 # Actor sync's frame step (runtime/net_actors_game.c actors_frame). The root update (main+0xb36920) after its prologue
-# copies its object to x20; the host function at page +0xf60 does that move and then steps the sync core on the game's
-# own thread, so the game's calls that move, hold and remove copies run where the game runs its actors. Off by default:
+# loads [x0+0xa8] into x0; the host function at page +0xf60 steps the sync core on the game's own thread and then does
+# that load (a displaced write must be to x0..x18: the lifted caller keeps x19..x28 in locals across a call), so the game's calls that move, hold and remove copies run where the game runs its actors. Off by default:
 # with it off, na_game() is NULL and the client never offers the actors add-on.
 set actors_frame TOTK_ACTORS_SYNC 0
-site actors_frame main b36944 aa0003f4 94efd587   # root update: mov x20, x0
+site actors_frame main b36948 f9405400 94efd586   # root update: ldr x0, [x0, #0xa8]

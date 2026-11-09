@@ -261,20 +261,38 @@ static int hook_on(void) {
 const NaGame *na_game(void) { return hook_on() ? &game_121 : NULL; }
 
 #ifdef HOST_ACTORS_FRAME
-// The root update's displaced `mov x20, x0` (main+0xb36944), then one step of the sync core, at most every 15 ms and on
-// the first thread that ran the hook, so the core keeps one thread as net_actors.h asks.
+// One step of the sync core, at most every 15 ms and on the first thread that ran the hook (the core keeps one thread,
+// net_actors.h), then the root update's displaced `ldr x0, [x0, #0xa8]` (main+0xb36948). The game calls of the step
+// change registers the root update still holds (x1 among them), so every register is put back before the load.
 static void actors_frame(Cpu *c) {
-    c->x[20] = c->x[0];
     static _Atomic uint32_t owner_tid;
-    static uint64_t last_ns;
+    static uint64_t last_ns, log_ns, calls, steps, other;
     uint32_t tid = plat_thread_id(), none = 0;
-    if (!atomic_compare_exchange_strong(&owner_tid, &none, tid) && none != tid) return;
     uint64_t now = plat_now_ns();
-    if (now - last_ns < 15000000u) return;
-    last_ns = now;
-    hook_cpu = c;
-    nal_tick(NULL);
-    hook_cpu = NULL;
+    int mine = atomic_compare_exchange_strong(&owner_tid, &none, tid) || none == tid;
+    if (!mine) other++;
+    else if (++calls, now - log_ns >= 10000000000ull) {   // a line every 10 s: how often and where it ran, what it did
+        NalStats ls;
+        nal_stats(&ls);
+        const NaStats *s = nal_core_stats();
+        rt_log("actors: frame hook %llu calls (%llu steps, %llu on other threads) on thread %u; live %d, in %u out %u "
+               "dropped %u/%u bad %u; owned %u copies %u offers %u poses %u gone in %u out %u removed %u",
+               (unsigned long long)calls, (unsigned long long)steps, (unsigned long long)other, tid, ls.live, ls.in,
+               ls.out, ls.in_dropped, ls.out_dropped, ls.bad, s ? s->owned : 0, s ? s->copies : 0, s ? s->offers : 0,
+               s ? s->poses : 0, s ? s->gones_in : 0, s ? s->gones_out : 0, s ? s->removed : 0);
+        log_ns = now, calls = steps = other = 0;
+    }
+    if (mine && now - last_ns >= 15000000u) {
+        static _Thread_local Cpu saved;
+        steps++;
+        last_ns = now;
+        memcpy(&saved, c, sizeof saved);
+        hook_cpu = c;
+        nal_tick(NULL);
+        hook_cpu = NULL;
+        memcpy(c, &saved, sizeof saved);
+    }
+    memcpy(&c->x[0], (const void *)(uintptr_t)(c->x[0] + 0xa8), 8);
 }
 
 __attribute__((constructor)) static void actors_frame_register(void) { rt_register_host(HOST_ACTORS_FRAME, actors_frame); }
