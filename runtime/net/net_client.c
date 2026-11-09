@@ -1067,7 +1067,8 @@ static void session(unsigned gen) {
         if (was_live || !lost_at) {
             lost_at = now;
             rt_log("net: %s Reconnecting for up to %u s", C.why, C.hold_ms / 1000);
-            pub_state(NET_CONNECTING, "");
+            // the toast and the Online tab say why the game is connecting again, not a bare "Connecting..."
+            pub_state(NET_CONNECTING, "Lost the connection to the server. Reconnecting...");
         }
         if (now - lost_at > (uint64_t)C.hold_ms * 1000u) {
             room_clear();

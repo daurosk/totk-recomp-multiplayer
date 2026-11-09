@@ -438,7 +438,8 @@ def ends_a(srv, bots, cl, addr, exe_srv, tmp, port, settings):
     srv.p.kill()
     srv.p.wait()
     t0 = time.time()
-    check(cl.event('state', 12, lambda e: e['state'] == CONNECTING) is not None, 'server gone: reconnecting')
+    ev = cl.event('state', 12, lambda e: e['state'] == CONNECTING)
+    check(ev is not None and 'Reconnecting' in ev['text'], f'server gone: reconnecting, and the state says so ({ev and ev["text"]})')
     ev = cl.event('state', 15, lambda e: e['state'] == OFFLINE)
     took = time.time() - t0
     check(ev is not None and 'Lost the connection' in ev['text'], f'server gone: lost connection ({ev and ev["text"]})')

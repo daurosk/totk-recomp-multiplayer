@@ -337,6 +337,12 @@ static void chat_submit() {
             ch = NET_CHAT_TEAM;
         } else if (!strcmp(cmd, "a") || !strcmp(cmd, "all") || !strcmp(cmd, "say")) {
             ch = NET_CHAT_ALL;
+        } else if (!strcmp(cmd, "me") || !strcmp(cmd, "who") || !strcmp(cmd, "teams") || !strcmp(cmd, "motd") ||
+                   !strcmp(cmd, "help")) {
+            // Sent whole on the all channel: net_chat_send turns "/me text" into an action line, and the server
+            // answers its own commands (/who, /teams, /motd, /help) with a system line to this player alone.
+            net_chat_send(NET_CHAT_ALL, nullptr, t);
+            return chat_close();
         } else {
             online_toast("Commands: /w name msg, /r msg, /t msg, /a msg", 2);
             return;
@@ -537,6 +543,7 @@ void online_list_layout(float w, float h, float scale) {
 
 // ---- net events and the per-frame pump
 static void on_events() {
+    static char kicked[NET_TEXT_MAX];   // the reason of the last NET_EV_KICKED, until its NET_EV_STATE arrives
     NetEvent ev[16];
     int n;
     while ((n = net_poll_events(ev, 16)) > 0) {
@@ -566,12 +573,17 @@ static void on_events() {
                 online_toast(t, 0);
                 break;
             }
-            case NET_EV_KICKED: snprintf(t, sizeof t, "You were removed: %s", e.text), online_toast(t, 2); break;
+            case NET_EV_KICKED:
+                snprintf(t, sizeof t, "You were removed: %s", e.text), online_toast(t, 2);
+                snprintf(kicked, sizeof kicked, "%s", e.text);
+                break;
             case NET_EV_MUTED: online_toast(e.accepted ? "You were muted" : "You were unmuted", 2); break;
             case NET_EV_ROLE_CHANGED: online_toast(e.accepted ? "You are now a moderator" : "You are no longer a moderator", 0); break;
             case NET_EV_SERVER_MESSAGE: online_toast(e.text, 2); break;
             case NET_EV_STATE:   // a reason (full, banned, wrong password, lost...) replaces the bare state
-                if (e.text[0]) online_toast(e.text, 2);
+                // a kick or ban ends the connection with the reason the "You were removed" toast already showed
+                if (e.text[0] && !strcmp(e.text, kicked)) kicked[0] = 0;
+                else if (e.text[0]) online_toast(e.text, 2);
                 else online_toast(net_state() == NET_ONLINE ? "Connected" : net_state() == NET_CONNECTING ? "Connecting..." : "Disconnected", 0);
                 break;
             }

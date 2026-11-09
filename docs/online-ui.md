@@ -36,7 +36,8 @@ west, which is how the teleport is tried alone in single player.
 
 **Chat box** (bottom left). The chat key (default Enter) opens it and takes the keyboard; Enter sends, Esc closes, Tab
 changes the channel. Three channels: all, team and whisper (`/w name message`; `/r message` answers the last whisper;
-`/t` and `/a` pick a channel for one line). System lines are gold, team lines green, whispers violet. While closed it
+`/t` and `/a` pick a channel for one line). `/me text` sends an action line to everyone, and the server's `/who`,
+`/teams`, `/motd` and `/help` answer with a system line only you see. System lines are gold, team lines green, whispers violet. While closed it
 shows the latest lines and fades out a few seconds after the last one (`net_chat_fade`); open, it scrolls with the mouse
 wheel. The game gets no input while you type.
 
