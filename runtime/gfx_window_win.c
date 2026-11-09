@@ -30,10 +30,13 @@ static HWND g_hwnd;
 static PlatEvent g_wnd_ready;   // manual-reset: the window thread made the window or gave up
 static int g_wnd_failed;
 static int g_background;                   // TOTK_BACKGROUND_WINDOW: the window stays behind the user's windows
+static int g_test_slot = -1;               // TOTK_TEST_WINDOW: 0, 1 or 2, the slot on the second monitor; -1 off
 static int g_fs_pending;                   // window thread: TOTK_FULLSCREEN waits for the first activation
 static volatile int32_t g_dpi = USER_DEFAULT_SCREEN_DPI;   // the window's DPI, set by the window thread
 
 HWND gfx_window_handle(void) { return g_hwnd; }
+
+int gfx_window_test_slot(void) { return g_test_slot; }
 
 int gfx_window_vk_extensions(const char **out, int max) {
     if (max < 2) return 0;
@@ -69,6 +72,52 @@ static void outer_size(HWND h, int cw, int ch, int *ow, int *oh) {
     AdjustWindowRectExForDpi(&r, WND_STYLE, FALSE, 0, h ? GetDpiForWindow(h) : GetDpiForSystem());
     *ow = r.right - r.left;
     *oh = r.bottom - r.top;
+}
+
+// ---- TOTK_TEST_WINDOW=<slot>: test runs put the window on a monitor other than the primary one, in one of three slots
+// stacked top to bottom, each a third of that monitor's working area. The window is shown without activation and never
+// raised, and input_win.c never confines or hides the cursor, so a test game never takes the user's focus or mouse.
+// The process is per-monitor DPI aware (totk.manifest), so the monitor rectangles and the frame measured at the window's
+// own DPI are physical pixels on the target monitor.
+static BOOL CALLBACK find_secondary(HMONITOR m, HDC dc, LPRECT r, LPARAM out) {
+    (void)dc, (void)r;
+    MONITORINFO mi = {sizeof mi};
+    if (GetMonitorInfoW(m, &mi) && !(mi.dwFlags & MONITORINFOF_PRIMARY)) {
+        *(MONITORINFO *)out = mi;
+        return FALSE;   // the first one other than the primary monitor
+    }
+    return TRUE;
+}
+
+// The slot's rectangle on the second monitor's working area (the primary monitor's when there is no other).
+static RECT test_slot_area(int slot) {
+    MONITORINFO mi = {0};
+    EnumDisplayMonitors(NULL, NULL, find_secondary, (LPARAM)&mi);
+    if (!mi.cbSize) {
+        mi.cbSize = sizeof mi;
+        GetMonitorInfoW(MonitorFromPoint((POINT){0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
+        rt_log("gfx: TOTK_TEST_WINDOW: no second monitor, using the primary one");
+    }
+    RECT w = mi.rcWork;
+    int third = (w.bottom - w.top) / 3;
+    return (RECT){w.left, w.top + slot * third, w.right, w.top + (slot + 1) * third};
+}
+
+// Window thread: the largest 16:9 client area whose framed window (GetWindowRect, invisible resize borders included)
+// fits the slot, placed at the slot's top left, shown without activation. Called once the window exists, so the frame is
+// measured at the DPI of the monitor it was created on.
+static void test_window_place(HWND h, RECT a) {
+    int fw, fh;
+    outer_size(h, 0, 0, &fw, &fh);   // frame width and height alone
+    int cw = a.right - a.left - fw, ch = a.bottom - a.top - fh;
+    if (cw * 9 > ch * 16) cw = ch * 16 / 9;
+    ch = cw * 9 / 16;
+    SetWindowPos(h, HWND_BOTTOM, a.left, a.top, cw + fw, ch + fh, SWP_NOACTIVATE);
+    ShowWindow(h, SW_SHOWNOACTIVATE);
+    RECT r = {0};
+    GetWindowRect(h, &r);
+    rt_log("gfx: test window slot %d: window (%ld,%ld)-(%ld,%ld), client %dx%d, DPI %u", g_test_slot, r.left, r.top,
+           r.right, r.bottom, cw, ch, GetDpiForWindow(h));
 }
 
 // Windows turns the display off and sleeps after the idle timeout, and gamepad input does not count as activity. While
@@ -119,6 +168,7 @@ static void note_applied(void) {
 static void apply_settings(HWND h) {
     int size_changed = strcmp(cfg_value("TOTK_WINDOW_SIZE"), g_applied_size) != 0, fs = cfg_fullscreen(), fs_changed = fs != g_applied_fs;
     note_applied();
+    if (g_test_slot >= 0) return;   // a test window keeps its slot and stays windowed
     if (size_changed) {
         int cw, ch, ow, oh;
         cfg_window_size(&cw, &ch);
@@ -206,7 +256,7 @@ static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
     if (menu_window_msg(h, m, w, l, &input_res)) return input_res;
     switch (m) {
     case WM_KEYDOWN:
-        if (w == VK_F11 && !(l & (1 << 30))) {   // bit 30: auto-repeat
+        if (w == VK_F11 && !(l & (1 << 30)) && g_test_slot < 0) {   // a test window keeps its slot   // bit 30: auto-repeat
             input_cursor_suspend(1);
             toggle_fullscreen(h);
             input_cursor_suspend(0);
@@ -316,9 +366,21 @@ static void window_main(void *arg) {
     // and keyboard input waits for the foreground (input_win.c). If Windows still refuses the foreground, the taskbar
     // button flashes, and TOTK_FULLSCREEN waits for the first activation.
     // TOTK_BACKGROUND_WINDOW=1 (test runs): no flashing, never fullscreen at start, and F11 keeps the window's place.
-    int background = g_background = cfg_get("TOTK_BACKGROUND_WINDOW") && atoi(cfg_get("TOTK_BACKGROUND_WINDOW"));
-    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"TotK Recomp", WND_STYLE, CW_USEDEFAULT, CW_USEDEFAULT, ow, oh, NULL,
-                             NULL, inst, NULL);
+    // TOTK_TEST_WINDOW=0|1|2 (test runs): as TOTK_BACKGROUND_WINDOW, and the window sits in that slot of the second
+    // monitor (test_window_place), is never activated, and the size settings and F11 leave it alone.
+    const char *tw = cfg_get("TOTK_TEST_WINDOW");
+    if (tw && *tw >= '0' && *tw <= '2' && !tw[1]) g_test_slot = *tw - '0';
+    else if (tw && *tw) rt_log("gfx: TOTK_TEST_WINDOW=%s ignored (0, 1 or 2)", tw);
+    int background = g_background =
+        g_test_slot >= 0 || (cfg_get("TOTK_BACKGROUND_WINDOW") && atoi(cfg_get("TOTK_BACKGROUND_WINDOW")));
+    RECT slot_area = {0};
+    int x = CW_USEDEFAULT, y = CW_USEDEFAULT;
+    if (g_test_slot >= 0) {
+        slot_area = test_slot_area(g_test_slot);
+        x = slot_area.left, y = slot_area.top;   // created there, so it takes that monitor's DPI from the start
+        ow = 320, oh = 180;
+    }
+    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"TotK Recomp", WND_STYLE, x, y, ow, oh, NULL, NULL, inst, NULL);
     if (!g_hwnd) {
         rt_log("gfx: CreateWindowEx failed (%lu)", GetLastError());
         g_wnd_failed = 1;
@@ -331,7 +393,8 @@ static void window_main(void *arg) {
         // The frame was measured at the system DPI; the window may have opened on a monitor at another scale.
         plat_xchg32(&g_dpi, (int32_t)GetDpiForWindow(g_hwnd));
         outer_size(g_hwnd, cw, ch, &ow, &oh);
-        SetWindowPos(g_hwnd, HWND_BOTTOM, 0, 0, ow, oh, SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        if (g_test_slot >= 0) test_window_place(g_hwnd, slot_area);
+        else SetWindowPos(g_hwnd, HWND_BOTTOM, 0, 0, ow, oh, SWP_NOMOVE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         if (!background) {
             // Pending before the raise: the activation it gets is the first WM_ACTIVATEAPP, which takes the fullscreen
             // setting; set after it, fullscreen waited for the next activation and the game started in a window
@@ -382,6 +445,7 @@ void wsys_client_size(int *w, int *h) {
 int wsys_minimized(void) { return IsIconic(g_hwnd) != 0; }
 
 void wsys_resize(int cw, int ch) {
+    if (g_test_slot >= 0) return;   // a test window keeps its slot
     int ow, oh;
     outer_size(g_hwnd, cw, ch, &ow, &oh);
     SetWindowPos(g_hwnd, NULL, 0, 0, ow, oh, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);

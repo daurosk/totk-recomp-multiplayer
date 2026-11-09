@@ -266,6 +266,19 @@ exe's own version first, then of the other one.
 
 The online wire (`online/proto/`, [online-wire.md](online-wire.md)): `.venv\Scripts\python tests\net_proto_check.py` compiles the codec with Monocypher using MSYS2 Clang, compares its tables with online-wire.md, runs round trips, 1 to 7 byte chunks, truncation, flipped bytes, oversize, features, sealing and the handshake, then fuzzes for 10 minutes on 4 processes (`--fuzz-seconds 30` for a quick run). Every change to `online/proto/` passes it. No game files.
 
+The online client (`runtime/net/net_client.c`): `.venv\Scripts\python tests\net_client_check.py` builds the server, the bot and the client with the runtime replaced by shims (`tests/net_client_main.c`), and drives the client against the real server on localhost: join, the player list and positions, chat on every channel, teams, teleports both ways, every host tool, a reconnect within the hold, kicks, bans, a password, a full room, another protocol version and a changed server key (about 30 s). Every change to `runtime/net/` passes it. No game files.
+
+Test runs of the game never take the user's focus or mouse. Every game started for a test sets
+`TOTK_TEST_WINDOW=<slot>` (0, 1 or 2; `tools/run_game.py` sets it by run slot unless `--show`): the window opens on the
+first monitor that is not the primary one, in that third of its working area counted from the top, at the largest 16:9
+size whose whole frame fits there, measured at that monitor's own DPI. It is shown without activation and never raised,
+the cursor is never confined or hidden, F11 and the window size setting leave it in place, and the log line
+`gfx: test window slot` gives its rectangle. With no second monitor it uses the primary one. Input for the online UI
+goes through `TOTK_TEST_INPUT=<file>`, not through the window: the test script appends lines to the file and the game
+acts on each new one within 0.2 s: `type <text>`, `enter`, `chat <text>` (type, then enter), `esc`, `wheel-down`,
+`wheel-up`, `wheel <n>` (a scripted wheel screen, 0 closes it), `confirm`, `list`, `yes`, `no` (the list is at
+`test_input_line` in `runtime/ui/online_ui.cpp`). Close the game when the run ends.
+
 The server (`server/`, [server.md](server.md)): `.venv\Scripts\python tests\net_server_check.py` builds the server and the test bot (`tools/net_bot.c`) with undefined-behaviour checks that trap, runs three servers on free localhost ports and drives them with bots: sessions, chat, teams, teleports, host tools, limits and hostile clients (about a minute; `--release` tests the optimised build). Every change to `server/` or `online/proto/` passes it. CI runs it on Linux.
 
 Shaders: `.venv-py314\Scripts\python tools\shader_census.py --version <ver> --translate` extracts every Maxwell shader

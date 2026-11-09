@@ -1,6 +1,6 @@
 // The client side of online play, as the in-game UI (ui/online_ui.cpp) and the teleport (teleport.c) use it. This header
-// is the whole contract: net_stub.c implements it offline (nothing connected, or three to five invented players with
-// TOTK_NET_FAKE=1), and the real client implements the same functions over the wire protocol (docs/online-wire.md).
+// is the whole contract: net_client.c implements it over the wire protocol (docs/online-wire.md), and with
+// TOTK_NET_FAKE=1 hands every call to net_stub.c, which plays three to five invented players offline.
 //
 // Threading: every function is called from the present thread, the thread that draws the UI. An implementation that
 // talks to a server on its own thread guards its state itself; the arrays handed out are copies.
@@ -64,7 +64,7 @@ typedef enum {
     NET_EV_MUTED,                   // you were muted (accepted 1) or unmuted (0)
     NET_EV_ROLE_CHANGED,            // your role changed; accepted: 1 granted, 0 taken
     NET_EV_SERVER_MESSAGE,          // text: the host's message (it also arrives as a system chat line)
-    NET_EV_STATE                    // the connection state changed (net_state)
+    NET_EV_STATE                    // the connection state changed (net_state); text: why, when it failed or ended
 } NetEventType;
 
 typedef struct {
@@ -90,17 +90,20 @@ typedef enum {
 typedef struct {
     char name[NET_NAME_MAX];        // the name the player goes by
     char address[96];               // "host:port"
-    char token[64];                 // optional join secret
+    char token[64];                 // optional join secret: the room's password or a one-time claim code
 } NetConfig;
 
 // ---- connection
-// Whether online features exist at all: the UI draws nothing while this is 0. The stub says 1 with TOTK_NET_FAKE=1; a
-// real client says 1 once the player turned online play on.
+// Whether online features exist at all: the UI draws nothing while this is 0. The stub says 1 with TOTK_NET_FAKE=1; the
+// real client says 1 once the player set a server address (net_address in totk.ini or the Online tab).
 int net_enabled(void);
 int net_connect(const NetConfig *cfg);   // 1 when the attempt started; progress arrives as NET_EV_STATE
 void net_disconnect(void);
 NetState net_state(void);
 uint32_t net_self_id(void);              // 0 while not online
+// Why the last connection failed or ended, as a sentence for the player ("The server is full."); "" when it did not.
+// NET_EV_STATE carries the same text in its text field when the state changed for that reason.
+const char *net_status_text(void);
 // Called once per presented frame, before the UI reads anything: pumps sockets, timers, the fake traffic.
 void net_tick(void);
 
