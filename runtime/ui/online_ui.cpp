@@ -20,6 +20,7 @@ extern "C" {
 #include "input_map.h"
 #include "platform/platform.h"
 #include "teleport.h"
+#include "puppet_self.h"
 #include "ui/menu.h"
 }
 
@@ -703,6 +704,7 @@ void online_pump(uint64_t frame) {
     net_tick();
     on_events();
     report_local();
+    puppet_self_frame();
     test_input_poll();
     double now = now_s();
     toasts_expire(now);
