@@ -1256,8 +1256,8 @@ void net_tick(void) {
         if (G.nev == NC_EVENTS) memmove(G.ev, G.ev + 1, (size_t)(--G.nev) * sizeof *G.ev);
         G.ev[G.nev++] = evs[i];
     }
-    // actor sync steps here, once per presented frame, until the game side has a hook in the game's own frame step
-    nal_tick(G.have_pos ? G.pos : NULL);
+    // actor sync steps in the game's own frame (runtime/net_actors_game.c actors_frame); it needs the player's place
+    nal_player(G.have_pos ? G.pos : NULL);
 }
 
 int net_players(NetPlayer *out, int max) {

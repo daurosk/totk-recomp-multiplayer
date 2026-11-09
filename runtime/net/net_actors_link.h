@@ -35,8 +35,10 @@ void nal_from_server(uint16_t type, const uint8_t *payload, size_t len);
 int nal_send_out(int (*send)(uint16_t type, const void *msg));
 // The connection ended (lost or closed): the game side drops its copies on its next tick. Network thread.
 void nal_lost(void);
-// Once per game frame: hands over what arrived and steps the core. player_pos (NULL when unknown) gives the herd cell
-// the local player stands in (na_set_place). Game side.
+// The local player's position as net_client.c last had it (NULL: unknown), for nal_tick(NULL). Any thread.
+void nal_player(const float *pos);
+// Once per game frame: hands over what arrived and steps the core. player_pos gives the herd cell the local player
+// stands in (na_set_place); NULL takes the one nal_player stored. Game side: runtime/net_actors_game.c actors_frame.
 void nal_tick(const float *player_pos);
 // Tests: the adapter nal_tick uses instead of na_game() (NULL: back to na_game()).
 void nal_use(const NaGame *game);

@@ -50,6 +50,8 @@ static struct {
     int64_t offset_us;              // server clock minus local microseconds
     uint32_t admits, losses;        // raised by each admit and each loss: the game side catches up on its tick
     int granted;                    // the server granted OW_FEAT_ACTORS on the current connection
+    float player[3];                // the local player's last position (nal_player), for the herd cell
+    int have_player;
     NalStats st;
 } L;
 
@@ -185,6 +187,13 @@ static int send_out(void *ctx, uint16_t type, const void *msg) {
     return ok ? 0 : -1;
 }
 
+void nal_player(const float *pos) {
+    plat_mutex_lock(&L.mx);
+    if (pos) memcpy(L.player, pos, sizeof L.player);
+    L.have_player = pos != NULL;
+    plat_mutex_unlock(&L.mx);
+}
+
 void nal_tick(const float *player_pos) {
     const NaGame *g = game();
     plat_mutex_lock(&L.mx);
@@ -192,6 +201,9 @@ void nal_tick(const float *player_pos) {
     int live = L.granted && g;
     uint64_t account = L.account, base = L.serial_base;
     int64_t offset = L.offset_us;
+    float stored[3];
+    int have_stored = L.have_player;
+    memcpy(stored, L.player, sizeof stored);
     T.in.n = 0;
     if (live) {
         memcpy(T.in.b, L.in.b, L.in.n);
@@ -224,6 +236,7 @@ void nal_tick(const float *player_pos) {
         L.st.bad++;
         plat_mutex_unlock(&L.mx);
     }
+    if (!player_pos && have_stored) player_pos = stored;
     if (player_pos) na_set_place(T.w, ow_herd_cell(player_pos[0], player_pos[2]));
     int64_t now = (int64_t)(plat_now_ns() / 1000u) + offset;
     na_step(T.w, now > 0 ? (uint64_t)now : 0);
