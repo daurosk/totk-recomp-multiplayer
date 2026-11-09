@@ -1,7 +1,9 @@
 // Offline lab for actor sync (runtime/net/net_actors.c): two or three invented games and a stub server in one process.
 // Every message goes through the real codec (ow_encode, ow_decode) both ways. The stub server's owner policy is the
-// simplest that the wire allows (first offer wins, a release frees the actor, the creator owns a spawn at epoch 1); the
-// real policy is the server's (branch owner-server), and the cases here only rely on what any policy must do.
+// simplest that the wire allows (docs/online-wire.md 9.1): the first offer wins, a game is a candidate from its offer to
+// its gone OW_GONE_UNLOADED, an owner that unloads or releases hands the actor to the first other candidate or to owner
+// 0, the creator owns a spawn at epoch 1, and a spawn whose parent another game owns is answered with gone
+// OW_GONE_REMOVED. The real policy is the server's (server/sv_owner.c); the cases only rely on what any policy must do.
 //
 //     python tests/net_actors_check.py      (builds this with MSYS2 Clang and runs it)
 //
@@ -174,10 +176,19 @@ static void to_game(int gi, uint16_t type, const void *msg) {
     na_on_message(G[gi].w, type, back);
 }
 
-typedef struct { ow_aid id; uint64_t owner; uint32_t epoch; uint8_t cls; char name[65]; ow_body body; int used; } SvActor;
+typedef struct {
+    ow_aid id;
+    uint64_t owner;
+    uint32_t epoch, cands;   // cands: bit i, game i offered it and has not unloaded it
+    uint8_t cls;
+    char name[65];
+    ow_body body;
+    int used;
+} SvActor;
 static SvActor sv[2048];
 static uint64_t herd_leader;
 static int sv_drop_poses;   // test switch: the server keeps states back
+static int sv_double_offers, sv_refused_spawns;
 
 static SvActor *sv_find(const ow_aid *id, int make) {
     for (int i = 0; i < 2048; i++)
@@ -205,6 +216,18 @@ static void sv_owner_all(SvActor *a, uint8_t cause) {
     for (int i = 0; i < ngames; i++) to_game(i, OW_T_owner, &m);
 }
 
+// The owner gave the actor up: the first other candidate gets it, else nobody runs it (owner 0).
+static void sv_hand_on(SvActor *a, int from) {
+    a->owner = 0;
+    for (int i = 0; i < ngames; i++)
+        if (i != from && a->cands & (1u << i)) {
+            a->owner = G[i].account;
+            break;
+        }
+    a->epoch++;
+    sv_owner_all(a, a->owner ? OW_OWNER_FAR : OW_OWNER_LEFT);
+}
+
 static void server(void) {
     static _Alignas(16) uint8_t m[1 << 20];
     for (int qi = 0; qi < nq; qi++) {
@@ -219,7 +242,9 @@ static void server(void) {
         case OW_T_offer: {
             ow_offer *o = (ow_offer *)m;
             SvActor *a = sv_find(&o->id, 1);
-            if (a->owner) break;   // owned: the offer is only a sign the game has it
+            if (a->cands & (1u << x->from)) sv_double_offers++;   // offered twice in one load
+            a->cands |= 1u << x->from;
+            if (a->owner) break;   // owned: the offer makes the game a candidate
             a->owner = from, a->epoch++, a->cls = o->class_;
             snprintf(a->name, sizeof a->name, "%s", o->name);
             memcpy(a->body.pos, o->pos, 12);
@@ -230,8 +255,7 @@ static void server(void) {
             ow_release *r = (ow_release *)m;
             SvActor *a = sv_find(&r->id, 0);
             if (!a || a->owner != from || a->epoch != r->epoch) break;
-            a->owner = 0, a->epoch++;
-            sv_owner_all(a, OW_OWNER_LEFT);
+            sv_hand_on(a, x->from);
             break;
         }
         case OW_T_actor_send: {
@@ -259,6 +283,13 @@ static void server(void) {
         }
         case OW_T_spawn: {
             ow_spawn *s = (ow_spawn *)m;
+            SvActor *par = s->info.parent.origin || s->info.parent.serial ? sv_find(&s->info.parent, 0) : NULL;
+            if (par && par->owner && par->owner != from) {   // a copy's doing: refused
+                ow_gone no = {.id = s->info.id, .epoch = 1, .cause = OW_GONE_REMOVED};
+                to_game(x->from, OW_T_gone, &no);
+                sv_refused_spawns++;
+                break;
+            }
             SvActor *a = sv_find(&s->info.id, 1);
             a->owner = from, a->epoch = 1, a->cls = s->info.class_, a->body = s->info.body;
             snprintf(a->name, sizeof a->name, "%s", s->info.name);
@@ -271,7 +302,13 @@ static void server(void) {
         case OW_T_gone: {
             ow_gone *g = (ow_gone *)m;
             SvActor *a = sv_find(&g->id, 0);
-            if (!a || a->owner != from) break;
+            if (!a) break;
+            if (g->cause == OW_GONE_UNLOADED) {   // no longer loaded there; from the owner, a release too
+                a->cands &= ~(1u << x->from);
+                if (a->owner == from) sv_hand_on(a, x->from);
+                break;
+            }
+            if (a->owner != from) break;   // only the owner ends an actor
             a->used = 0;
             for (int i = 0; i < ngames; i++)
                 if (i != x->from) to_game(i, OW_T_gone, g);
@@ -301,13 +338,14 @@ static void start(int n) {
     for (int i = 0; i < ngames; i++) na_free(G[i].w);
     memset(G, 0, sizeof G);
     memset(sv, 0, sizeof sv);
-    nq = 0, ngames = n, now_us = 1000000, herd_leader = 0, sv_drop_poses = 0;
+    nq = 0, ngames = n, now_us = 1000000, herd_leader = 0, sv_drop_poses = 0, sv_double_offers = sv_refused_spawns = 0;
     for (int i = 0; i < n; i++) {
         G[i].next_handle = 0x100000ull * (i + 1);
         NaGame a = api(&G[i]);
         G[i].w = na_new(&a, send_c2s, (void *)(intptr_t)i);
         G[i].account = 11 + (uint64_t)i;
         na_set_self(G[i].w, G[i].account);
+        na_set_serial_base(G[i].w, 7000000 + 1000 * (uint64_t)i);   // the session's admit.server_time_us
     }
 }
 // Runs the games frame by frame (60 Hz) for secs: game frame, sync step, then the server's turn.
@@ -347,6 +385,10 @@ static void case_objects(void) {
     CHECK(own->dead && !cp->live && G[ib].removed_killed == 1, "objects: felled on the owner, gone by its death on the copy");
     CHECK(role(ib, 0, 100) == (NaRole)-1 && role(ia, 0, 100) == (NaRole)-1, "objects: both games forget the felled tree");
     CHECK(na_count(G[0].w, NA_OWNED) + na_count(G[1].w, NA_OWNED) == 1, "objects: the rock still has one owner");
+    run(10);
+    CHECK(na_stats(G[0].w)->offers == 2 && na_stats(G[1].w)->offers == 2 && !sv_double_offers,
+          "objects: each game offers each actor once per load (%u and %u)", na_stats(G[0].w)->offers,
+          na_stats(G[1].w)->offers);
 }
 
 static void case_camp(void) {
@@ -391,6 +433,45 @@ static void case_handover(void) {
     run(4);
     CHECK(role(1, 0, 300) == NA_OWNED && b->ai, "hand-over: the game that still has it takes it over and runs it");
     CHECK(b->life == 20, "hand-over: the life it had goes with it (%d)", b->life);
+    uint32_t releases = na_stats(G[0].w)->releases;
+    a->live = 1;   // game 0 comes back: the actor loads there anew and is offered again
+    run(1);
+    CHECK(role(0, 0, 300) == NA_COPY && !a->ai && na_stats(G[0].w)->offers == 2 && releases == 0,
+          "hand-over: unloading said gone unloaded, not release; the new load is offered once and shows a copy");
+    // the owner unloads with no other candidate: nobody runs it, and the copy stands still
+    b->body.vel[0] = 3;
+    run(0.5);
+    for (int k = 0; k < 3; k++) {
+        b->live = 0;
+        run(0.5);
+    }
+    a->live = 0, b->live = 1;   // only game 0 is left, and it unloads too
+    run(0.5);
+    a->live = 1, b->live = 0;
+    run(0.5);
+    CHECK(role(0, 0, 300) == NA_OWNED && a->ai, "hand-over: a game that loads an actor nobody runs offers and gets it");
+}
+
+static void case_nobody(void) {
+    start(2);
+    Act *a = g_add(&G[0], 350, "Enemy_Lizalfos_Junior", 0, 0, 20), *b = g_add(&G[1], 350, "Enemy_Lizalfos_Junior", 0, 0, 20);
+    run(0.5);
+    int o = role(0, 0, 350) == NA_OWNED ? 0 : 1;
+    Act *own = o ? b : a, *cp = o ? a : b;
+    own->body.vel[0] = 2;
+    run(1);
+    static ow_owner m;
+    memset(&m, 0, sizeof m);
+    m.id = (ow_aid){0, 350}, m.epoch = 9, m.owner = 0, m.cause = OW_OWNER_LEFT, m.state_time_us = now_us;
+    snprintf(m.name, sizeof m.name, "Enemy_Lizalfos_Junior");
+    m.body = own->body;
+    to_game(0, OW_T_owner, &m), to_game(1, OW_T_owner, &m);
+    float x0 = cp->body.pos[0];
+    run(1);
+    CHECK(role(0, 0, 350) == NA_COPY && role(1, 0, 350) == NA_COPY && !a->ai && !b->ai,
+          "nobody: owner 0 leaves the actor a copy without AI on both screens");
+    CHECK(fabsf(cp->body.pos[0] - x0) < 0.01f, "nobody: the copy stands still at the last state (moved %.2f m)",
+          fabsf(cp->body.pos[0] - x0));
 }
 
 static void case_summons(void) {
@@ -405,6 +486,15 @@ static void case_summons(void) {
     CHECK(g_count(&G[1 - o], "Enemy_Keese") == 1 && g_count(&G[o], "Enemy_Keese") == 1,
           "summons: after the wait one body on each screen (%d and %d)", g_count(&G[o], "Enemy_Keese"),
           g_count(&G[1 - o], "Enemy_Keese"));
+    NaInfo ki;
+    int found = 0;
+    for (uint64_t k = 0; k < 4; k++)
+        found |= na_info(G[o].w, &(ow_aid){G[o].account, 7000000 + 1000 * (uint64_t)o + k}, &ki);
+    CHECK(found, "summons: its id is (creator, a serial from the session's admit time)");
+    g_add(&G[1 - o], 0, "Enemy_Keese_Ice", 4, 1, 1);   // a summons beside the boss's copy: the copy's doing
+    run(6);
+    CHECK(sv_refused_spawns == 1 && g_count(&G[1 - o], "Enemy_Keese_Ice") == 0 && g_count(&G[o], "Enemy_Keese_Ice") == 0,
+          "summons: one made beside a copy is refused by the server and removed (%d refused)", sv_refused_spawns);
     // both games made the same summons: the later one waits longer and takes the other's copy instead
     start(2);
     na_on_message(G[1].w, OW_T_herd, &(ow_herd){.leader = G[0].account});   // game 0 leads: game 1 is a follower
@@ -422,15 +512,15 @@ static void case_projectiles(void) {
     run(0.3);
     g_add(&G[1], 500, "Enemy_Bokoblin_Bow", 0, 0, 13);
     run(0.5);
-    g_add(&G[0], 0, "Arrow_Enemy", 1, 0, 0);   // the owner's archer shoots
+    g_add(&G[0], 0, "Bullet_Enemy_A", 1, 0, 0);   // the owner's archer shoots
     run(0.3);
-    CHECK(g_count(&G[1], "Arrow_Enemy") == 1, "shots: the owner's shot shows on the other screen");
-    g_add(&G[1], 0, "Arrow_Bomb", 1, 1, 0);   // a shot appears beside the copy (fired by it): it stays local
+    CHECK(g_count(&G[1], "Bullet_Enemy_A") == 1, "shots: the owner's shot shows on the other screen");
+    g_add(&G[1], 0, "Bullet_Bomb_A", 1, 1, 0);   // a shot appears beside the copy (fired by it): it stays local
     run(0.3);
-    CHECK(g_count(&G[0], "Arrow_Bomb") == 0, "shots: a shot beside a copy is not shared");
-    g_add(&G[1], 0, "Arrow_Fire", 100, 100, 0);   // the player's own shot, no foe near
+    CHECK(g_count(&G[0], "Bullet_Bomb_A") == 0, "shots: a shot beside a copy is not shared");
+    g_add(&G[1], 0, "Bullet_Fire_A", 100, 100, 0);   // the player's own shot, no foe near
     run(0.3);
-    CHECK(g_count(&G[0], "Arrow_Fire") == 1, "shots: a player's shot is shared");
+    CHECK(g_count(&G[0], "Bullet_Fire_A") == 1, "shots: a player's shot is shared");
 }
 
 static void case_wildlife(void) {
@@ -480,6 +570,7 @@ int main(void) {
     case_objects();
     case_camp();
     case_handover();
+    case_nobody();
     case_summons();
     case_projectiles();
     case_wildlife();

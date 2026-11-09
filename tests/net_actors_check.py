@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCES = [ROOT / 'tests' / 'net_actors_lab.c', ROOT / 'runtime' / 'net' / 'net_actors.c',
-           ROOT / 'online' / 'proto' / 'ow_codec.c']
+           ROOT / 'online' / 'proto' / 'ow_codec.c', ROOT / 'online' / 'proto' / 'ow_classes.c']
 
 
 def compiler():

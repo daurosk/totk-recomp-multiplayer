@@ -4,9 +4,15 @@
 // The life of an actor in one world:
 //   LOCAL    seen, not shared: a class the room does not share, or nobody is online.
 //   OFFERED  a placed actor this game runs and offered to own; it keeps running here until the server answers.
+//            A game offers a placed actor once per load (docs/online-wire.md 9.1, "What a game sends") and stays a
+//            candidate until it unloads it, which it says with gone OW_GONE_UNLOADED; it never offers again to ask.
 //   OWNED    the server named this game owner: its AI runs here and its state goes out every 100 to 250 ms.
 //   COPY     another game owns it: its AI is off here (NaGame.puppet) and the owner's states drive it.
-// An owner message moves an actor between OWNED and COPY at any time (a hand-over), carrying the last full state.
+// An owner message moves an actor between OWNED and COPY at any time (a hand-over), carrying the last full state. Owner 0
+// (nobody runs it) leaves the actor a copy that stands still at its last state, on every screen.
+//
+// What is shared, as what class and with which components comes from the class table both ends compile
+// (online/proto/classes.txt, ow_class_find); name hashes are ow_name_hash.
 //
 // Behaviour follows the old online version's rules (P13 docs online-native-m3b.md and m5.md, re-expressed):
 // - Spawn rule. A run-time enemy that a placement manager made is one game's: a follower's game is refused the placement
@@ -20,6 +26,8 @@
 //   every other game shows copies of those rows. What a game had before it became a follower stays its own.
 #include "net_actors.h"
 
+#include "../../online/proto/ow_classes.h"
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -27,7 +35,6 @@
 #define POSE_MOVING_US 100000   // state interval of a moving owned actor
 #define POSE_STILL_US 250000    // ... and of a still one: the wire's floor (docs/online-wire.md, actor_send)
 #define STILL_V 0.05f           // m/s under which an actor counts as still
-#define OFFER_RETRY_US 3000000
 #define COPY_FORGET_US 15000000 // a copy with no state for this long and no actor here is forgotten
 #define EXTRAPOLATE_US 500000   // copies are moved on by their velocity for at most this long past a state
 #define LEADER_WAIT_S 2.5
@@ -43,6 +50,8 @@
 typedef struct {
     ow_aid id;
     uint8_t cls, role, auto_placed, seen, ours_made, herd;   // herd: a copy made for a herd row
+    uint8_t offered;         // this game offered it in its current load and has not said it unloaded it
+    uint16_t comps;          // the components its states carry, bit k for kind k (the class table's row)
     char name[OW_ACTOR_NAME_MAX + 1];
     uint64_t handle, owner;
     uint32_t epoch;
@@ -90,11 +99,10 @@ static float dist2(const float a[3], const float b[3]) {
     return x * x + y * y + z * z;
 }
 
-// FNV-1a over the name's bytes: the herd rows' name hash (docs/online-actors.md, "Open questions").
-static uint32_t name_hash(const char *s) {
-    uint32_t h = 2166136261u;
-    for (; *s; s++) h = (h ^ (uint8_t)*s) * 16777619u;
-    return h;
+// The components a name's states carry (the class table's row), 0 for a name it does not share.
+static uint16_t comps_of(const char *name) {
+    const ow_class_row *r = ow_class_find(name);
+    return r && r->class_ != OW_CLASS_LOCAL ? r->comps : 0;
 }
 
 static void reindex(NaWorld *w) {
@@ -140,6 +148,7 @@ static Ent *add(NaWorld *w, const ow_aid *id, uint8_t cls, const char *name) {
     memset(e, 0, sizeof *e);
     e->id = *id, e->cls = cls;
     strncpy(e->name, name ? name : "", OW_ACTOR_NAME_MAX);
+    e->comps = comps_of(e->name);
     e->t_first = e->t_seen = w->now;
     uint32_t h = hash_aid(id) & (TABLE - 1);
     while (w->by_id[h] >= 0) h = (h + 1) & (TABLE - 1);
@@ -156,8 +165,8 @@ static int shared_class(uint8_t cls) {
     return cls <= OW_CLASS_TOWNSPERSON || cls == OW_CLASS_PROJECTILE || cls == OW_CLASS_DEVICE;
 }
 
-static void put_life(ow_comp *comps, uint8_t *count, int32_t life, int32_t life_max) {
-    if (life_max <= 0 || *count >= OW_COMPS_MAX) return;
+static void put_life(ow_comp *comps, uint8_t *count, uint16_t kinds, int32_t life, int32_t life_max) {
+    if (!(kinds & (1u << OW_C_life)) || life_max <= 0 || *count >= OW_COMPS_MAX) return;
     ow_c_life l = {.life = life, .life_max = life_max};
     if (!ow_comp_put(&comps[*count], OW_C_life, &l)) (*count)++;
 }
@@ -208,6 +217,7 @@ NaWorld *na_new(const NaGame *game, NaSend send, void *send_ctx) {
 
 void na_free(NaWorld *w) { free(w); }
 void na_set_self(NaWorld *w, uint64_t account) { w->self = account; }
+void na_set_serial_base(NaWorld *w, uint64_t first) { w->counter = first; }
 const NaStats *na_stats(const NaWorld *w) { return &w->st; }
 
 static int is_follower(const NaWorld *w, const float pos[3]) {
@@ -227,7 +237,7 @@ static void offer(NaWorld *w, Ent *e) {
     strncpy(m.name, e->name, OW_ACTOR_NAME_MAX);
     memcpy(m.pos, e->body.pos, sizeof m.pos);
     if (!w->send(w->send_ctx, OW_T_offer, &m)) w->st.offers++;
-    e->t_offer = w->now;
+    e->t_offer = w->now, e->offered = 1;
 }
 
 static void send_gone(NaWorld *w, Ent *e, uint8_t cause) {
@@ -248,13 +258,16 @@ static const Ent *nearest_foe(const NaWorld *w, const float pos[3], float r) {
     return best;
 }
 
-static void share_spawn(NaWorld *w, const NaSeen *s) {
+// parent: what made it as far as this game can tell (a summons' or a shot's nearest foe), NULL for none. The server
+// refuses a spawn whose parent another game owns: a copy's doing, which the owner's game makes for real.
+static void share_spawn(NaWorld *w, const NaSeen *s, const Ent *parent) {
     ow_spawn m = {0};
-    m.info.id.origin = w->self, m.info.id.serial = ++w->counter;
+    m.info.id.origin = w->self, m.info.id.serial = w->counter++;
+    if (parent) m.info.parent = parent->id;
     m.info.class_ = s->cls;
     strncpy(m.info.name, s->name, OW_ACTOR_NAME_MAX);
     m.info.body = s->body;
-    put_life(m.info.comps, &m.info.comps_count, s->life, s->life_max);
+    put_life(m.info.comps, &m.info.comps_count, comps_of(s->name), s->life, s->life_max);
     Ent *e = add(w, &m.info.id, s->cls, s->name);
     if (!e) return;
     if (w->send(w->send_ctx, OW_T_spawn, &m)) {
@@ -272,7 +285,7 @@ static int spawn_rule(NaWorld *w, const NaSeen *s, uint64_t t_first) {
     double age = (double)(w->now - t_first) * 1e-6;
     if (s->cls == OW_CLASS_PROJECTILE) {
         const Ent *foe = nearest_foe(w, s->body.pos, SHOT_M);
-        if (!foe || foe->role == NA_OWNED || foe->role == NA_LOCAL) share_spawn(w, s);
+        if (!foe || foe->role == NA_OWNED || foe->role == NA_LOCAL) share_spawn(w, s, foe);
         return 1;   // fired by a copy: the owner's game shares the real one, this one stays here
     }
     if (s->cls != OW_CLASS_ENEMY && s->cls != OW_CLASS_BOSS && s->cls != OW_CLASS_ANIMAL) return 1;
@@ -285,7 +298,7 @@ static int spawn_rule(NaWorld *w, const NaSeen *s, uint64_t t_first) {
             return 1;   // there before the players met: stays this game's own, unshared
         }
         if (s->cls == OW_CLASS_ANIMAL) return 1;   // the leader's animals go as herd rows
-        share_spawn(w, s);
+        share_spawn(w, s, NULL);
         return 1;
     }
     // a summons: wait for another game's copy
@@ -299,7 +312,7 @@ static int spawn_rule(NaWorld *w, const NaSeen *s, uint64_t t_first) {
         }
     }
     if (age < (is_leader(w) ? LEADER_WAIT_S : FOLLOWER_WAIT_S)) return 0;
-    share_spawn(w, s);
+    share_spawn(w, s, nearest_foe(w, s->body.pos, SUMMON_M));
     return 1;
 }
 
@@ -323,7 +336,7 @@ static void send_poses(NaWorld *w) {
         ow_actor_pose *p = &m.items[m.items_count++];
         memset(p, 0, sizeof *p);
         p->id = e->id, p->epoch = e->epoch, p->body = e->body, p->flags = still(&e->body) ? OW_POSE_STILL : 0;
-        put_life(p->comps, &p->comps_count, e->life, e->life_max);
+        put_life(p->comps, &p->comps_count, e->comps, e->life, e->life_max);
         e->t_sent = w->now;
         if (m.items_count == OW_POSE_BATCH) {
             if (!w->send(w->send_ctx, OW_T_actor_send, &m)) w->st.poses += m.items_count;
@@ -359,7 +372,7 @@ static void send_herd(NaWorld *w) {
         if (w->have_leader_pos && dist2(s->body.pos, w->leader_pos) > ZONE_M * ZONE_M) continue;
         ow_herd_row *r = &m.beasts[m.beasts_count++];
         r->local = (uint32_t)(s->handle >> 4);   // stable while the animal lives
-        r->name_hash = name_hash(s->name);
+        r->name_hash = ow_name_hash(s->name);
         memcpy(r->pos, s->body.pos, 12);
         memcpy(r->vel, s->body.vel, 12);
         r->yaw = 2.0f * atan2f(s->body.rot[1], s->body.rot[3]);
@@ -383,6 +396,7 @@ void na_step(NaWorld *w, uint64_t now_us) {
             if (e && !e->handle) {   // a placed actor this world knew of before it loaded here
                 set_handle(w, e, s->handle);
                 if (e->role == NA_COPY) become_copy(w, e);   // stops its AI: the owner runs it
+                if (!e->offered && w->self && !s->dead) offer(w, e);   // loaded here: a candidate from now on
             }
         }
         if (e) {
@@ -392,11 +406,6 @@ void na_step(NaWorld *w, uint64_t now_us) {
             if (s->dead && e->role == NA_OWNED) {
                 send_gone(w, e, OW_GONE_KILLED);
                 drop(w, e);
-            } else if (e->role == NA_OFFERED && w->now >= e->t_offer + OFFER_RETRY_US && w->self) {
-                offer(w, e);
-            } else if (e->role == NA_LOCAL && w->self && shared_class(e->cls)) {
-                e->role = NA_OFFERED;
-                offer(w, e);
             }
             continue;
         }
@@ -421,17 +430,13 @@ void na_step(NaWorld *w, uint64_t now_us) {
     for (int i = 0; i < w->n; i++) {
         Ent *e = &w->e[i];
         if (e->seen) continue;
-        if (e->handle && (e->role == NA_OWNED || e->role == NA_OFFERED)) {   // unloaded or gone in this game
-            if (e->role == NA_OWNED) {
-                if (e->id.origin) {
-                    send_gone(w, e, OW_GONE_UNLOADED);
-                } else {
-                    ow_release m = {.id = e->id, .epoch = e->epoch};
-                    if (!w->send(w->send_ctx, OW_T_release, &m)) w->st.releases++;
-                }
-            }
+        if (e->handle && (e->role == NA_OWNED || e->role == NA_OFFERED || (e->role == NA_COPY && !e->id.origin))) {
+            // unloaded in this game: an owned or offered actor, or a placed one this game showed as a copy. The
+            // server hears it as gone OW_GONE_UNLOADED (from the owner that is a release too), and this world forgets
+            // it: a placed actor that loads again is offered again, as a new load.
+            if (e->role == NA_OWNED || e->offered) send_gone(w, e, OW_GONE_UNLOADED);
             drop(w, e), i--;
-        } else if (e->role == NA_COPY && e->handle) {   // our copy went (the game unloaded it): make it again later
+        } else if (e->role == NA_COPY && e->handle) {   // our run-time copy went (the game unloaded it): make it again later
             set_handle(w, e, 0);
         } else if (e->role == NA_COPY && w->now > e->t_state + COPY_FORGET_US) {
             drop(w, e), i--;
@@ -474,11 +479,13 @@ static void on_owner(NaWorld *w, const ow_owner *m) {
         e->body = m->body, e->t_state = m->state_time_us;
         get_life(m->comps, m->comps_count, &e->life, &e->life_max);
     }
-    if (m->owner && m->owner == w->self) become_owner(w, e);
-    else if (m->owner) become_copy(w, e);
-    else if (e->handle) {   // nobody owns it: the game that has it loaded runs it until someone offers again
-        e->role = NA_LOCAL;
-        w->g.puppet(w->g.ctx, e->handle, 0);
+    if (m->owner && m->owner == w->self) {
+        become_owner(w, e);
+    } else {
+        // another game runs it, or nobody does (owner 0): then every game shows it still at its last state, and
+        // this game stays a candidate if it offered it
+        if (!m->owner) memset(e->body.vel, 0, sizeof e->body.vel), memset(e->body.spin, 0, sizeof e->body.spin);
+        become_copy(w, e);
     }
 }
 
@@ -524,9 +531,9 @@ static void on_gone(NaWorld *w, const ow_gone *m) {
     } else if (e->handle && e->id.origin) {
         w->g.remove(w->g.ctx, e->handle, OW_GONE_UNLOADED);
     } else if (e->handle) {
-        e->role = NA_LOCAL;   // a placed actor nobody runs now: this game takes it back at its next offer
+        // the record of a placed actor went while this game still has it: it runs here again, and the next scan
+        // sees it as a new load and offers it
         w->g.puppet(w->g.ctx, e->handle, 0);
-        return;
     }
     drop(w, e);
 }
@@ -615,16 +622,7 @@ int na_count(const NaWorld *w, NaRole role) {
 
 // ---- classes by name
 
-uint8_t na_class_of(const char *n) {
-    static const struct { const char *prefix; uint8_t cls; } rows[] = {
-        {"Enemy_Giant", OW_CLASS_BOSS},      {"Enemy_Lynel", OW_CLASS_BOSS},   {"Enemy_Golem", OW_CLASS_BOSS},
-        {"Enemy_Drake", OW_CLASS_BOSS},      {"Enemy_Mogurudo", OW_CLASS_BOSS},{"Enemy_SandWorm", OW_CLASS_BOSS},
-        {"Enemy_", OW_CLASS_ENEMY},          {"Animal_", OW_CLASS_ANIMAL},     {"Npc_", OW_CLASS_TOWNSPERSON},
-        {"Obj_Tree", OW_CLASS_MAP_OBJECT},   {"Obj_Rock", OW_CLASS_MAP_OBJECT},{"Obj_Ore", OW_CLASS_MAP_OBJECT},
-        {"Obj_", OW_CLASS_WORLD_OBJECT},     {"Item_", OW_CLASS_ITEM},         {"Weapon_", OW_CLASS_ITEM},
-        {"Bullet_", OW_CLASS_PROJECTILE},    {"Arrow_", OW_CLASS_PROJECTILE},
-    };
-    for (size_t i = 0; i < sizeof rows / sizeof *rows; i++)
-        if (!strncmp(n, rows[i].prefix, strlen(rows[i].prefix))) return rows[i].cls;
-    return OW_CLASS_LAST + 1;
+uint8_t na_class_of(const char *name) {
+    const ow_class_row *r = ow_class_find(name);
+    return r && r->class_ != OW_CLASS_LOCAL ? r->class_ : OW_CLASS_LAST + 1;
 }

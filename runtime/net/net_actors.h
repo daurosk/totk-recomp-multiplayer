@@ -49,7 +49,7 @@ typedef struct NaGame {
     void (*hit)(void *ctx, uint64_t handle, const ow_hit_info *hit);
     // Takes an actor out through the game's own removal; cause is OW_GONE_* (killed: its death, with loot only on the owner).
     void (*remove)(void *ctx, uint64_t handle, uint8_t cause);
-    // The actor name whose name hash (FNV-1a) is hash, for herd rows; NULL when the game knows none. May be NULL.
+    // The actor name whose name hash (ow_name_hash) is hash, for herd rows; NULL when the game knows none. May be NULL.
     const char *(*name_of)(void *ctx, uint32_t hash);
 } NaGame;
 
@@ -70,6 +70,9 @@ NaWorld *na_new(const NaGame *game, NaSend send, void *send_ctx);
 void na_free(NaWorld *w);
 // The account this world plays as (0 until admitted) and the server's clock in microseconds, both from net_client.c.
 void na_set_self(NaWorld *w, uint64_t account);
+// The first serial of this game's run-time actors: the session's admit.server_time_us, so ids are never reused, not even
+// across a reconnect (docs/online-wire.md 9.1, "Ids"). Each spawn takes the next.
+void na_set_serial_base(NaWorld *w, uint64_t first);
 // One frame step: scan, offer, send states, drive copies, apply the spawn and wildlife rules. now_us: server clock.
 void na_step(NaWorld *w, uint64_t now_us);
 // A frame of the actors add-on from the server (owner, actor_recv, hit_in, spawned, gone, herd, taken).
@@ -98,8 +101,8 @@ typedef struct {
 int na_info(const NaWorld *w, const ow_aid *id, NaInfo *out);   // 1 when the world follows it
 int na_count(const NaWorld *w, NaRole role);
 
-// The class of an actor by its name, as the game's naming goes (Enemy_, Animal_, Obj_, Npc_...). Until the server's
-// class table (online/proto/classes.txt) lands this is the client's whole table; OW_CLASS_LAST+1 for a name not shared.
+// The class of an actor by its name from the class table both ends compile (online/proto/classes.txt, ow_class_find);
+// OW_CLASS_LAST+1 for a name no row shares.
 uint8_t na_class_of(const char *name);
 
 #ifdef __cplusplus
