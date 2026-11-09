@@ -1,8 +1,7 @@
-// The offline implementation of net/net_client.h. Without TOTK_NET_FAKE=1 nothing is online: net_enabled says 0 and the
-// UI stays hidden. With TOTK_NET_FAKE=1 it plays a small server by itself, so the whole UI can be tried with no network:
+// The offline implementation of net/net_client.h, under the names of net/net_fake.h: net_client.c hands every call here
+// while TOTK_NET_FAKE=1. It plays a small server by itself, so the whole UI can be tried with no network:
 // the local player plus four invented players, a team, scripted chat, an invite and a teleport request arriving after
 // a few seconds, and replies to whispers. TOTK_NET_FAKE_ROLE=player|mod|host (default host) sets the local role.
-// The real client replaces this file with the same functions.
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,7 +9,8 @@
 
 #include "cfg.h"
 #include "host.h"
-#include "net/net_client.h"
+#define NET_FAKE_IMPL
+#include "net/net_fake.h"
 #include "platform/platform.h"
 
 static int g_fake = -1;
@@ -143,6 +143,7 @@ void net_disconnect(void) {
 
 NetState net_state(void) { return g_state; }
 uint32_t net_self_id(void) { return g_state == NET_ONLINE ? g_self : 0; }
+const char *net_status_text(void) { return ""; }
 
 static void whisper_reply(const char *from, const char *text) {
     char t[NET_TEXT_MAX];

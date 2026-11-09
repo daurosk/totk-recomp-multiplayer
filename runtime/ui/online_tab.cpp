@@ -30,7 +30,8 @@ static void set(const char *key, const char *value) {
     opt_save_soon();
 }
 
-static void text_row(const char *label, const char *key, const char *def, const char *hint, bool *typing) {
+static void text_row(const char *label, const char *key, const char *def, const char *hint, bool *typing,
+                     ImGuiInputTextFlags flags = 0) {
     static char buf[128];
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
@@ -39,7 +40,7 @@ static void text_row(const char *label, const char *key, const char *def, const 
     char id[64];
     snprintf(id, sizeof id, "##%s", key);
     snprintf(buf, sizeof buf, "%s", cfg_or(key, def));
-    if (ImGui::InputTextWithHint(id, hint, buf, sizeof buf)) set(key, buf);
+    if (ImGui::InputTextWithHint(id, hint, buf, sizeof buf, flags)) set(key, buf);
     if (ImGui::IsItemActive()) *typing = true;
 }
 
@@ -77,7 +78,7 @@ void online_tab(float scale, float bottom) {
     NetState st = net_state();
     ImGui::TextColored(ImVec4(0.93f, 0.76f, 0.33f, 1), "Connection");
     if (!net_enabled()) {
-        ImGui::TextWrapped("Online play is not connected to a server yet. The name and the keys below are saved for when it is.");
+        ImGui::TextWrapped("Enter a server address below to play online. Without one the game stays single-player.");
     } else {
         ImGui::Text("Status: %s", st == NET_ONLINE ? "online" : st == NET_CONNECTING ? "connecting..." : "offline");
         ImGui::SameLine();
@@ -86,9 +87,13 @@ void online_tab(float scale, float bottom) {
         } else if (ImGui::Button("Disconnect")) {
             net_disconnect();
         }
+        const char *why = net_status_text();
+        if (st == NET_OFFLINE && why && *why) ImGui::TextColored(ImVec4(0.96f, 0.80f, 0.35f, 1), "%s", why);
     }
     text_row("Your name", "TOTK_NET_NAME", "Player", "shown to other players", &g_capture_typing);
     text_row("Server address", "TOTK_NET_ADDRESS", "", "host:port", &g_capture_typing);
+    text_row("Password", "TOTK_NET_PASSWORD", "", "the room's password or invite code, if it has one", &g_capture_typing,
+             ImGuiInputTextFlags_Password);
     bool ac = cfg_or("TOTK_NET_AUTOCONNECT", "0")[0] == '1';
     if (ImGui::Checkbox("Connect when the game starts", &ac)) set("TOTK_NET_AUTOCONNECT", ac ? "1" : "0");
 

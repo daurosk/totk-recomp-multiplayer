@@ -150,8 +150,10 @@ int text_entry_run(const SwkbdRequest *req, uint16_t *out, size_t cap, size_t *n
     e.edit_proc = (WNDPROC)SetWindowLongPtrW(e.edit, GWLP_WNDPROC, (LONG_PTR)edit_proc);
 
     if (owner) EnableWindow(owner, FALSE);
-    ShowWindow(e.wnd, SW_SHOW);
-    SetForegroundWindow(e.wnd);
+    // A test window (TOTK_TEST_WINDOW) never takes the foreground, and neither does its keyboard
+    int test_win = gfx_window_test_slot() >= 0;
+    ShowWindow(e.wnd, test_win ? SW_SHOWNOACTIVATE : SW_SHOW);
+    if (!test_win) SetForegroundWindow(e.wnd);
     SetFocus(e.edit);
     SendMessageW(e.edit, EM_SETSEL, 0, -1);
     SetTimer(e.wnd, TIMER_ID, TIMER_MS, NULL);
@@ -173,7 +175,7 @@ int text_entry_run(const SwkbdRequest *req, uint16_t *out, size_t cap, size_t *n
     KillTimer(e.wnd, TIMER_ID);
     if (owner) EnableWindow(owner, TRUE);   // before the window goes, so activation returns to the game window
     DestroyWindow(e.wnd);
-    if (owner) SetForegroundWindow(owner);
+    if (owner && !test_win) SetForegroundWindow(owner);
     DeleteObject(font);
     if (quit) PostQuitMessage((int)msg.wParam);
     if (e.result < 0) return 0;

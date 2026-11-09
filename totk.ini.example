@@ -274,7 +274,10 @@
 # net_name = Player
 # The server to join, as host:port, and whether the game connects by itself when it starts (1) or the Online tab of the
 # settings menu (F1) does.
-# net_address = play.example.org:7777
+# net_address = play.example.org:27120
+# The room's password, or the one-time invite code its host gave you. The server asks for it only on your first visit;
+# after that your game's online key (in the profile folder, online/identity.key) lets you back in.
+# net_password = secret
 # net_autoconnect = 0
 # Keys, by name (a to z, 0 to 9, f2 to f12, enter, space, grave, slash, lbracket, rbracket, ...) or none. The wheel key is
 # held: aim with the mouse, the stick or the number keys, let go to choose. The Online tab rebinds them with a click.

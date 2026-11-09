@@ -2,9 +2,9 @@ name: Server
 
 on:
   push:
-    paths: ["server/**", "online/**", "tools/net_bot.c", "tools/build_server.py", "tests/net_server_check.py", ".github/workflows/server.yml"]
+    paths: ["server/**", "online/**", "tools/net_bot.c", "tools/build_server.py", "tests/net_server_check.py", "runtime/net/**", "tests/net_client_check.py", "tests/net_client_main.c", ".github/workflows/server.yml"]
   pull_request:
-    paths: ["server/**", "online/**", "tools/net_bot.c", "tools/build_server.py", "tests/net_server_check.py", ".github/workflows/server.yml"]
+    paths: ["server/**", "online/**", "tools/net_bot.c", "tools/build_server.py", "tests/net_server_check.py", "runtime/net/**", "tests/net_client_check.py", "tests/net_client_main.c", ".github/workflows/server.yml"]
 
 jobs:
   linux:
@@ -17,3 +17,22 @@ jobs:
       - run: sudo apt-get install -y clang
       - run: CC=clang python tests/net_server_check.py
       - run: CC=gcc python tools/build_server.py --out build/server-gcc
+      # The game's online client (runtime/net/net_client.c) against the real server and bots, the runtime replaced by shims.
+      - run: CC=clang python tests/net_client_check.py
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The runner's own C:\msys64 with UCRT64 Clang added, where build_server.py and the client check look for it.
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          release: false
+          install: mingw-w64-ucrt-x86_64-clang
+      - run: Add-Content $env:GITHUB_PATH 'C:\msys64\ucrt64\bin'
+      - run: python tests/net_server_check.py
+      - run: python tests/net_client_check.py

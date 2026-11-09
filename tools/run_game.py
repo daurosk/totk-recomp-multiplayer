@@ -180,6 +180,8 @@ def main():
         env = dict(os.environ, TOTK_ASSUME_FOCUS='1', TOTK_INPUT='none', TOTK_INPUT_SCRIPT=str(a.script.resolve()))
         if not a.show:
             env['TOTK_BACKGROUND_WINDOW'] = '1'
+            # One of three places on the second monitor, by run slot; never activated, never takes the mouse
+            env['TOTK_TEST_WINDOW'] = str(int(Path(slot.name).stem[4:]) % 3)
         for kv in a.env:
             k, _, v = kv.partition('=')
             env[k] = v
