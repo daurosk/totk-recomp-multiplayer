@@ -20,10 +20,10 @@
 #define SV_MAX_CONNS 96
 /* Handshakes in progress at once, over all addresses. */
 #define SV_MAX_PENDING 32
-/* Add-ons this build grants (docs/online-wire.md, "Features and add-ons"). Release 1 implements none, so an offer
- * of any bit is answered with 0. An add-on is plugged in by implementing its message types in sv_room.c's
+/* Add-ons this build grants (docs/online-wire.md, "Features and add-ons"). Release 1 grants the economy (wallet, Lights
+ * ledger) and the sky clock; the rest of an offer is answered with 0. An add-on is plugged in by implementing its message types in sv_room.c's
  * dispatch, then adding its OW_FEAT_* bit here. */
-#define SV_FEATURES_GRANTED 0u
+#define SV_FEATURES_GRANTED (OW_FEAT_ECONOMY | OW_FEAT_SKY)
 
 /* ---- configuration (sv_store.c) ---- */
 typedef struct sv_config {
@@ -51,6 +51,10 @@ typedef struct sv_config {
     int frame_burst;          /* frames of any kind at once; over this the client is cut off */
     double frames_per_second;
     int log_chat;             /* write chat lines to the log */
+    int afk_seconds;          /* a player who has not moved, spoken or acted for this long is marked away; 0 for never */
+    int start_rupees;         /* rupees a new account starts with */
+    int wallet_earn_max;      /* most rupees one request may add */
+    int wallet_earn_per_minute; /* most rupees an account may gain in a minute, in a long run */
 } sv_config;
 
 void sv_config_defaults(sv_config *c);

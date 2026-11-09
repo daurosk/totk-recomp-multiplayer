@@ -279,7 +279,7 @@ acts on each new one within 0.2 s: `type <text>`, `enter`, `chat <text>` (type, 
 `wheel-up`, `wheel <n>` (a scripted wheel screen, 0 closes it), `confirm`, `list`, `yes`, `no` (the list is at
 `test_input_line` in `runtime/ui/online_ui.cpp`). Close the game when the run ends.
 
-The server (`server/`, [server.md](server.md)): `.venv\Scripts\python tests\net_server_check.py` builds the server and the test bot (`tools/net_bot.c`) with undefined-behaviour checks that trap, runs three servers on free localhost ports and drives them with bots: sessions, chat, teams, teleports, host tools, limits and hostile clients (about a minute; `--release` tests the optimised build). Every change to `server/` or `online/proto/` passes it. CI runs it on Linux.
+The server (`server/`, [server.md](server.md)): `.venv\Scripts\python tests\net_server_check.py` builds the server and the test bot (`tools/net_bot.c`) with undefined-behaviour checks that trap, runs three servers on free localhost ports and drives them with bots: sessions, chat, teams, teleports, host tools, limits and hostile clients (about a minute; `--release` tests the optimised build). Every change to `server/` or `online/proto/` passes it. CI runs it on Linux. `tests\net_server_economy_check.py` does the same for the economy (rupees, the Lights ledger, the Blood Moon leader and the away mark, about 20 s).
 
 Shaders: `.venv-py314\Scripts\python tools\shader_census.py --version <ver> --translate` extracts every Maxwell shader
 to `build\<ver>\shaders\` and runs it through the translator and `spirv-val`; failure groups go to `failures.txt`.

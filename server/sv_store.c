@@ -159,6 +159,10 @@ void sv_config_defaults(sv_config *c) {
     c->frame_burst = 200;
     c->frames_per_second = 60.0;
     c->log_chat = 1;
+    c->afk_seconds = 300;
+    c->start_rupees = 0;
+    c->wallet_earn_max = 5000;
+    c->wallet_earn_per_minute = 20000;
 }
 
 static const char DEFAULT_CONFIG[] =
@@ -208,7 +212,16 @@ static const char DEFAULT_CONFIG[] =
     "frames_per_second = 60.0\n"
     "\n"
     "# Write chat lines to server.log.\n"
-    "log_chat = true\n";
+    "log_chat = true\n"
+    "\n"
+    "# Seconds without moving, chatting or acting before the player list marks a player away (0: never).\n"
+    "afk_seconds = 300\n"
+    "\n"
+    "# The shared economy (docs/server.md). Rupees a new account starts with; the most one request may add; the most\n"
+    "# an account may gain in a minute. A game's request for more is cut down to this.\n"
+    "start_rupees = 0\n"
+    "wallet_earn_max = 5000\n"
+    "wallet_earn_per_minute = 20000\n";
 
 static int parse_value(char *v, char *out, size_t n, int *quoted) {
     *quoted = 0;
@@ -303,6 +316,10 @@ static int config_set(sv_config *c, const char *k, const char *v) {
     if (!strcmp(k, "frame_burst")) return as_int(v, 20, 100000, &c->frame_burst);
     if (!strcmp(k, "frames_per_second")) return as_double(v, 10, 100000, &c->frames_per_second);
     if (!strcmp(k, "log_chat")) return as_bool(v, &c->log_chat);
+    if (!strcmp(k, "afk_seconds")) return as_int(v, 0, 86400, &c->afk_seconds);
+    if (!strcmp(k, "start_rupees")) return as_int(v, 0, 999999, &c->start_rupees);
+    if (!strcmp(k, "wallet_earn_max")) return as_int(v, 1, 999999, &c->wallet_earn_max);
+    if (!strcmp(k, "wallet_earn_per_minute")) return as_int(v, 1, 9999999, &c->wallet_earn_per_minute);
     return -2;
 }
 
