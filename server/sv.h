@@ -20,10 +20,10 @@
 #define SV_MAX_CONNS 96
 /* Handshakes in progress at once, over all addresses. */
 #define SV_MAX_PENDING 32
-/* Add-ons this build grants (docs/online-wire.md, "Features and add-ons"). Release 1 implements none, so an offer
- * of any bit is answered with 0. An add-on is plugged in by implementing its message types in sv_room.c's
- * dispatch, then adding its OW_FEAT_* bit here. */
-#define SV_FEATURES_GRANTED 0u
+/* Add-ons this build grants (docs/online-wire.md, "Features and add-ons"); an offer of any other bit is answered
+ * without it. An add-on is plugged in by implementing its message types in sv_room.c's dispatch, then adding its
+ * OW_FEAT_* bit here. Granted: puppets (sv_puppets.c). */
+#define SV_FEATURES_GRANTED ((uint32_t)OW_FEAT_PUPPETS)
 
 /* ---- configuration (sv_store.c) ---- */
 typedef struct sv_config {
@@ -138,5 +138,27 @@ void sv_room_poll(int timeout_ms);
 void sv_room_stop(void);
 /* A console line from the person hosting (sv_room.c, "Console"). Returns 1 when the line asks the server to stop. */
 int sv_console(const char *line);
+
+/* What the add-ons may know of the player in a slot (0 to OW_PLAYERS_MAX - 1). */
+typedef struct sv_peer {
+    uint64_t account;
+    ow_place area;
+    int has_pos;           /* pos holds the latest 1 Hz position */
+    float pos[3];
+    int puppets;           /* the session was granted the puppets add-on */
+    float interest_m;      /* the room's interest distance */
+} sv_peer;
+/* Fills out for a live player (connected, not held). Returns 0 for a free or held slot. */
+int sv_room_peer(int slot, sv_peer *out);
+/* Sends a message to the live player in a slot; nothing for a free or held one. */
+void sv_room_send(int slot, uint16_t type, const void *msg);
+
+/* ---- puppets (sv_puppets.c) ---- */
+/* A self_state from the player in slot: relayed as player_state to the players that can see it. */
+void sv_puppets_state(int slot, const ow_self_state *m, uint64_t now);
+/* The player in slot reported a new area. */
+void sv_puppets_area(int slot, const ow_place *area);
+/* The slot was freed or given to a new session. */
+void sv_puppets_drop(int slot);
 
 #endif

@@ -576,6 +576,7 @@ static void player_remove(player *p, uint16_t reason) {
     team_drop_invites_of(p->account);
     tp_target_gone(p);
     uint64_t account = p->account;
+    sv_puppets_drop((int)(p - G.p));
     memset(p, 0, sizeof *p);
     p->conn = -1;
     ow_depart d = { .account = account, .reason = reason };
@@ -1010,6 +1011,7 @@ static void on_proof(conn *c, const ow_frame *f) {
         for (int i = 0; i < OW_PLAYERS_MAX && pi < 0; i++)
             if (!G.p[i].used) pi = i;
         p = &G.p[pi];
+        sv_puppets_drop(pi);
         memset(p, 0, sizeof *p);
         p->used = 1;
         memcpy(p->key, pr.identity, 32);
@@ -1082,6 +1084,26 @@ static void on_proof(conn *c, const ow_frame *f) {
            resumed ? "came back" : "joined", c->addr, keyhex);
 }
 
+/* ---- what the add-ons see (sv.h, sv_peer) ---- */
+
+int sv_room_peer(int slot, sv_peer *out) {
+    if (slot < 0 || slot >= OW_PLAYERS_MAX || !live(&G.p[slot])) return 0;
+    const player *p = &G.p[slot];
+    const conn *c = G.c[p->conn];
+    if (!c || c->state != C_LIVE) return 0;
+    out->account = p->account;
+    out->area = p->area;
+    out->has_pos = p->has_pos && p->scene == p->area.scene;
+    memcpy(out->pos, p->pos, sizeof out->pos);
+    out->puppets = (c->link.features & OW_FEAT_PUPPETS) != 0;
+    out->interest_m = INTEREST_M;
+    return 1;
+}
+
+void sv_room_send(int slot, uint16_t type, const void *msg) {
+    if (slot >= 0 && slot < OW_PLAYERS_MAX) send_to(&G.p[slot], type, msg);
+}
+
 /* ---- frames of an admitted session ---- */
 
 #define SV_UNION_MEMBER(id, name, dir, stage, cap, feat) ow_##name name;
@@ -1125,6 +1147,7 @@ static void on_live(conn *c, const ow_frame *f) {
     case OW_T_area:
         if (memcmp(&p->area, &g_msg.area.where, sizeof p->area)) G.roster_soft = 1;
         p->area = g_msg.area.where;
+        sv_puppets_area(c->player, &p->area);
         break;
     case OW_T_vitals:
         if (p->hearts_q != g_msg.vitals.hearts_q || p->hearts_max_q != g_msg.vitals.hearts_max_q ||
@@ -1146,6 +1169,7 @@ static void on_live(conn *c, const ow_frame *f) {
             G.roster_dirty = 1;
         }
         break;
+    case OW_T_self_state: sv_puppets_state(c->player, &g_msg.self_state, G.now); break;
     case OW_T_say: on_say(p, &g_msg.say); break;
     case OW_T_mark: if (action_ok(p)) on_mark(p, &g_msg.mark); break;
     case OW_T_team_create: if (action_ok(p)) on_team_create(p, &g_msg.team_create); break;
@@ -1160,7 +1184,7 @@ static void on_live(conn *c, const ow_frame *f) {
     case OW_T_announce: if (action_ok(p)) on_announce(p, &g_msg.announce); break;
     default:
         /* A sealed client type the session has no use for (a second proof). The reader already refused every
-         * add-on type, since this build grants none. */
+         * type of an add-on the session was not granted. */
         sv_log("%s: unexpected %s; disconnected", p->nick, ow_msg(f->type)->name);
         conn_end(c, 1, OW_WHY_PROTOCOL, "unexpected message", 0);
     }

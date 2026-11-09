@@ -15,6 +15,11 @@
  *   flood NAME COUNT TYPE [field=value]...
  *   quiet NAME 0|1                   stop or restart the bot's own pings and its answers to the server's
  *   drop NAME                        close the socket without a goodbye
+ *   walk NAME CX CY CZ [JITTER_MS] [LOSS_PCT]
+ *                                    the bot becomes a moving puppet: self_state about 20 times a second along the
+ *                                    tour of tools/net_bot_path.h around (CX, CY, CZ), each send moved by up to
+ *                                    JITTER_MS and LOSS_PCT of them left out (needs features=1 at connect)
+ *   stand NAME                       stops walking
  *   echo TEXT                        prints {"ev":"echo","text":TEXT} once the commands before it ran
  *   quit
  * Events: {"bot":NAME,"ev":TYPE,...fields} for each message, plus "challenge" (with the server key), "closed" and
@@ -30,6 +35,7 @@
 
 #include "../online/proto/ow_wire.h"
 #include "../online/third_party/monocypher/monocypher.h"
+#include "net_bot_path.h"
 
 enum { B_FREE, B_GREETED, B_LIVE, B_RAW, B_CLOSED };
 
@@ -46,6 +52,10 @@ typedef struct bot {
     uint32_t features, seq;
     int quiet, badsig;
     uint64_t next_ping;
+    int64_t clock_off;     /* server clock minus ours, from admit */
+    int walking, jitter_ms, loss_pct;
+    double centre[3];
+    uint64_t next_walk;
 } bot;
 
 enum { BOTS = 64 };
@@ -445,6 +455,7 @@ static void on_frame(bot *b, const ow_frame *f) {
     if (f->type == OW_T_admit) {
         const ow_admit *a = (const ow_admit *)g_msgbuf;
         ow_link_set_features(&b->link, a->features);
+        b->clock_off = (int64_t)a->server_time_us - (int64_t)sv_now_us();
         b->state = B_LIVE;
         b->next_ping = sv_now_us() + 1000000;
     }
@@ -494,6 +505,40 @@ static void bot_read(bot *b) {
     }
 }
 
+/* One step of a walking bot: its state at this moment of the tour, on the server clock. */
+static uint32_t g_rng = 12345;
+static uint32_t rnd(void) {
+    g_rng = g_rng * 1103515245u + 12345u;
+    return g_rng >> 8;
+}
+
+static void walk_step(bot *b, uint64_t now) {
+    if (now < b->next_walk) return;
+    int64_t span = b->jitter_ms > 0 ? (int64_t)(rnd() % (uint32_t)(2 * b->jitter_ms + 1)) - b->jitter_ms : 0;
+    b->next_walk = now + (uint64_t)(50000 + span * 1000);
+    if (b->loss_pct > 0 && (int)(rnd() % 100) < b->loss_pct) return;
+    uint64_t t = (uint64_t)((int64_t)now + b->clock_off);
+    bot_path_pt pt;
+    bot_path_at((double)t / 1e6, b->centre[0], b->centre[1], b->centre[2], &pt);
+    static ow_self_state m;
+    memset(&m, 0, sizeof m);
+    m.time_us = t;
+    for (int k = 0; k < 3; k++) m.body.pos[k] = (float)pt.p[k], m.body.vel[k] = (float)pt.v[k];
+    m.body.rot[1] = (float)sin(pt.yaw / 2), m.body.rot[3] = (float)cos(pt.yaw / 2);
+    ow_c_anim an;
+    memset(&an, 0, sizeof an);
+    an.slots_count = 1;
+    an.slots[0].anim = 0x100u + (uint32_t)pt.piece;
+    an.slots[0].frame = (float)fmod((double)t / 1e6 * 30.0, 60.0);
+    an.slots[0].rate = 1.0f;
+    if (!ow_comp_put(&m.comps[0], OW_C_anim, &an)) m.comps_count = 1;
+    if (pt.piece == 2) {
+        ow_c_glide g = { .on = 1, .lean = 0 };
+        if (!ow_comp_put(&m.comps[m.comps_count], OW_C_glide, &g)) m.comps_count++;
+    }
+    send_msg(b, OW_T_self_state, &m);
+}
+
 static int split(char *line, char **argv, int max) {
     int n = 0;
     for (char *s = line; *s && n < max;) {
@@ -524,6 +569,14 @@ static int run_command(char *line) {
     else if (!strcmp(c, "flood")) cmd_send(argv, argc, 1);
     else if (!strcmp(c, "quiet") && argc >= 3 && find(argv[1])) find(argv[1])->quiet = atoi(argv[2]);
     else if (!strcmp(c, "drop") && argc >= 2 && find(argv[1])) close_bot(find(argv[1]), "dropped");
+    else if (!strcmp(c, "walk") && argc >= 5 && find(argv[1])) {
+        bot *b = find(argv[1]);
+        for (int k = 0; k < 3; k++) b->centre[k] = atof(argv[2 + k]);
+        b->jitter_ms = argc >= 6 ? atoi(argv[5]) : 0;
+        b->loss_pct = argc >= 7 ? atoi(argv[6]) : 0;
+        b->walking = 1;
+        b->next_walk = 0;
+    } else if (!strcmp(c, "stand") && argc >= 2 && find(argv[1])) find(argv[1])->walking = 0;
     else if (!strcmp(c, "bye") && argc >= 2 && find(argv[1]) && find(argv[1])->state == B_LIVE) {
         ow_bye m;
         memset(&m, 0, sizeof m);
@@ -558,6 +611,7 @@ int main(int argc, char **argv) {
                 b->next_ping = now + 1000000;
                 if (send_msg(b, OW_T_ping, &p)) continue;
             }
+            if (b->state == B_LIVE && b->walking) walk_step(b, now);
             sv_pollfd_set(&fds[n], b->s, 1, 0);
             who[n++] = b;
         }

@@ -292,7 +292,7 @@ def body_a(srv, bots, keys):
     # ---- join ----
     a = bots.connect('alice', 'seedAlice', 'Alice', features=255)
     check(a.get('ev') == 'admit' and a['rank'] == 2 and a['resumed'] == 0, 'first account is admitted as the host')
-    check(a.get('features') == 0, 'release 1 grants no add-on even when all are offered')
+    check(a.get('features') == 1, 'of every add-on offered, release 1 grants puppets alone')
     check(a.get('rules', {}).get('hold_ms') == 3000 and a['rules']['options'] & 2, 'admit carries the room rules')
     keys['alice'] = bots.keys.get('alice')
     check((srv.data / 'host.txt').read_text().strip() == keys['alice'], 'the first account is written to host.txt')
@@ -819,6 +819,89 @@ def run_c(exe_srv, exe_bot, tmp, keys):
         srv.stop()
 
 
+def count(bots, bot, kind, within, **fields):
+    """How many such events arrive within the given time."""
+    n, end = 0, time.time() + within
+    while bots.expect(bot, kind, max(0.0, end - time.time()), **fields) is not None:
+        n += 1
+    return n
+
+
+def run_p(exe_srv, exe_bot, tmp):
+    """The puppets add-on: self_state relayed as player_state by area and interest (server/sv_puppets.c)."""
+    port = free_port()
+    settings = dict(max_players=8, open=True, hold_seconds=2, frame_burst=400, frames_per_second=200.0)
+    srv = Server(exe_srv, tmp / 'p', port, settings)
+    bots = Bots(exe_bot, port)
+    try:
+        acc = {}
+        for name, feats in (('al', 1), ('bo', 1), ('ca', 0), ('da', 1)):
+            ev = bots.connect(name, 'seedP' + name, name.title(), features=feats)
+            check(ev.get('ev') == 'admit' and ev['features'] == feats, f'puppets: {name} admitted with features {feats}')
+            acc[name] = ev.get('account')
+        where = {'al': (0, 0, 0), 'bo': (5, 0, 0), 'ca': (8, 0, 0), 'da': (1000, 0, 0)}
+        for name, p in where.items():
+            bots.send(name, 'area', **{'where.state': 1})
+            bots.send(name, 'position', pos=p)
+        bots.drain(0.3)
+        bots.cmd('walk al 0 0 0')
+        ev = bots.expect('bo', 'player_state', 2, account=acc['al'])
+        check(ev is not None, 'puppets: a walking player reaches a player near it')
+        check(ev is not None and len(ev.get('comps', [])) >= 1, 'puppets: the relayed state keeps its components')
+        n = count(bots, 'bo', 'player_state', 2.0, account=acc['al'])
+        check(30 <= n <= 46, f'puppets: about 20 states a second are relayed ({n} in 2 s)')
+        check(bots.none('ca', 'player_state', 0.3), 'puppets: a game without the add-on gets none')
+        check(bots.none('da', 'player_state', 0.3), 'puppets: a game 1 km away gets none (interest 250 m)')
+        check(bots.none('al', 'player_state', 0.3), 'puppets: the sender does not get its own state back')
+        # bob walks too, far from al's tour: al sees bob only while bob's own states put it in range
+        bots.cmd('walk bo 5 0 0')
+        check(bots.expect('al', 'player_state', 2, account=acc['bo']) is not None, 'puppets: both ways at once')
+        bots.cmd('stand bo')
+        bots.cmd('stand al')
+        bots.drain(0.3)
+        # a burst of states over the rate is dropped, not queued
+        bots.cmd('flood al 60 self_state time_us=1 body.pos=1,0,0 body.rot=0,0,0,1')
+        n = count(bots, 'bo', 'player_state', 1.0, account=acc['al'])
+        check(1 <= n <= 8, f'puppets: a flood of 60 states is cut to the burst ({n} relayed)')
+        bots.drain(0.5)
+        # leaving the world: loading, then another scene
+        bots.cmd('walk al 0 0 0')
+        check(bots.expect('bo', 'player_state', 2, account=acc['al']) is not None, 'puppets: walking again')
+        bots.send('al', 'area', **{'where.state': 2})
+        time.sleep(0.2)
+        bots.drain(0.1)
+        check(bots.none('bo', 'player_state', 0.6, account=acc['al']), 'puppets: nothing is relayed from a loading screen')
+        bots.send('al', 'area', **{'where.state': 1})
+        check(bots.expect('bo', 'player_state', 2, account=acc['al']) is not None, 'puppets: relayed again after loading')
+        bots.send('bo', 'area', **{'where.scene': 7, 'where.state': 1})
+        time.sleep(0.2)
+        bots.drain(0.1)
+        check(bots.none('bo', 'player_state', 0.6, account=acc['al']), 'puppets: nothing to a game in another scene')
+        bots.send('bo', 'area', **{'where.scene': 0, 'where.state': 1})
+        check(bots.expect('bo', 'player_state', 2, account=acc['al']) is not None, 'puppets: relayed again in the same scene')
+        bots.send('bo', 'area', **{'where.state': 0})
+        time.sleep(0.2)
+        bots.drain(0.1)
+        check(bots.none('bo', 'player_state', 0.6, account=acc['al']), 'puppets: nothing to a game on the title screen')
+        bots.send('bo', 'area', **{'where.state': 1})
+        bots.cmd('stand al')
+        # a state of a game without the add-on breaks the protocol
+        bots.cmd('sealraw ca 0280 ' + '00' * 61)
+        r = bots.expect('ca', 'refuse', 3)
+        check(r is not None and r['reason'] == WHY['protocol'], 'puppets: self_state without the add-on is refused')
+        bots.cmd('walk al 0 0 0')
+        check(bots.expect('bo', 'player_state', 2, account=acc['al']) is not None, 'puppets: walking before leaving')
+        bots.cmd('bye al')
+        d = bots.expect('bo', 'depart', 3, account=acc['al'])
+        check(d is not None, 'puppets: the walker leaves with depart')
+        bots.drain(0.1)
+        check(bots.none('bo', 'player_state', 0.5, account=acc['al']), 'puppets: no state after depart')
+    finally:
+        bots.stop()
+        code = srv.stop()
+        check(code == 0, f'puppets: server exits cleanly ({code})')
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument('--release', action='store_true', help='test the optimised build instead of the checked one')
@@ -832,6 +915,7 @@ def main():
         run_a(exe_srv, exe_bot, tmp, keys)
         run_b(exe_srv, exe_bot, tmp)
         run_c(exe_srv, exe_bot, tmp, keys)
+        run_p(exe_srv, exe_bot, tmp)
         print(f'{len(FAILS)} failures in {time.time() - t0:.0f} s')
         for f in FAILS:
             print('  ' + f)
