@@ -1,0 +1,113 @@
+# Which GameData keys the room shares and how (docs/online-saves.md). tools/world_keys.py reads this file, recovers
+# the key names of the user's own GameData list and writes generated/world-keys.tsv for the server and the game.
+#
+# Each [[group]] lists name patterns (fnmatch style: * any run, ? one character, [ starts a set, so a literal [ is
+# written [[]). The first group with a matching pattern decides the key's rule:
+#
+#   player   each account's own: kept in accounts/<id>/save.json, passed to no other game
+#   forward  shared, never goes back (a flag stays set, a count does not fall)
+#   steps    shared, never returns to a value it held before (quest steps and states are hashed enums with no order)
+#   owner    shared, written by the world owner's game alone (the host's game while it is connected)
+#   latest   shared, the last write wins
+#
+# A named key no group matches is shared with `default_named`; a key whose name was not recovered gets
+# `default_unnamed`. Unknown values stay with the player: a wrongly private key costs a little sharing, a wrongly
+# shared one can overwrite a player's inventory.
+
+default_named = "latest"
+default_unnamed = "player"
+
+[[group]]
+name = "world clock and Blood Moon"
+rule = "owner"
+patterns = ["World_BloodyMoonTimer", "World_IsBloodyMoonDay", "World_CurrentDateTime", "World_CurrentDays"]
+
+[[group]]
+name = "world time and events"
+rule = "owner"
+patterns = ["World_CurrentHour", "World_CurrentMinute", "World_WeatherForecast*", "World_ShootingStarPosition",
+            "World_ZonauRespawnTimer", "World_IsZonauRespawnDay"]
+
+[[group]]
+name = "where the player stands"
+rule = "player"
+patterns = ["World_PlayerPos*", "TimeDayLookWorld*", "InLargeDungeon*", "Sequence_CurrentBanc*",
+            "PlumGardenPlayerIsNearby*", "PositionCheck_*", "Ichikara_VillageIn*", "Ichikara_VillageNow*"]
+
+[[group]]
+name = "pouch and cooking buffs"
+rule = "player"
+patterns = ["Pouch.*", "MaterialShortCut.*", "ValidPouchIndex*", "PlayerStatus.*"]
+
+[[group]]
+name = "horses"
+rule = "player"
+patterns = ["Horse_Pos*", "Last_Ridden_Horse_Pos*", "OutsideOwnedHorseIndex*", "OwnedHorseList*", "DeadHorseList*",
+            "LastWildHorse*"]
+
+[[group]]
+name = "chests (every player opens each one)"
+rule = "player"
+patterns = ["IsTreasureBoxOpen.*", "IsTreasureBoxUnlock.*"]
+
+[[group]]
+name = "map pins, stamps and Autobuild drafts"
+rule = "player"
+patterns = ["MapData.IconData.*", "AutoBuilder.*"]
+
+[[group]]
+name = "the player's own records"
+rule = "player"
+patterns = ["RecipeCard.*", "SortPattern.*", "CharaDirectory_IsNew.*", "CharaDirectory_IsInstantTipsDisplayed.*",
+            "MaterialShortCutCounter.*", "InstantTips_IsEnd*", "ActionGuide_IsEnd*", "IsGet.*", "IsGetAnyway.*",
+            "IsGetAnyRupee*", "IsGetCaveMasterMedal.*", "Npc_Goddess_UtuwaSum*"]
+
+[[group]]
+name = "townspeople schedules (follow the owner's clock)"
+rule = "owner"
+patterns = ["Npc_*"]
+
+[[group]]
+name = "cutscenes played"
+rule = "forward"
+patterns = ["HavePlayedEvent.*"]
+
+[[group]]
+name = "quest steps and log states"
+rule = "steps"
+patterns = ["Step_*", "ChallengeLogState*"]
+
+[[group]]
+name = "shrine and temple states"
+rule = "steps"
+patterns = ["DungeonState.*", "KeyCrystalDungeonState.*"]
+
+[[group]]
+name = "shrines unlocked, temples, felled bosses"
+rule = "forward"
+patterns = ["KeyCrystalDungeonUnlocked*", "MapData.LargeDungeon.*", "IsDefeatBossEnemy.*"]
+
+[[group]]
+name = "Depths lightroots"
+rule = "forward"
+patterns = ["ArrivalPointState.*", "CheckPoint_IsDisplayFoliage.*"]
+
+[[group]]
+name = "map reveal and places found"
+rule = "forward"
+patterns = ["IsVisitLocation*"]
+
+[[group]]
+name = "Koroks"
+rule = "forward"
+patterns = ["IsAppearKorok.*", "KorokCarryProgress.*"]
+
+[[group]]
+name = "talks"
+rule = "forward"
+patterns = ["HaveTalked.*"]
+
+[[group]]
+name = "enemy records and counters (team totals)"
+rule = "forward"
+patterns = ["DefeatedEnemyNum.*", "EnemyBattleData.*", "EquipmentDeathCount.*", "TempName.*"]

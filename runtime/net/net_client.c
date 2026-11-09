@@ -53,6 +53,7 @@ typedef int nsock;
 #include "host.h"
 #include "net/net_client.h"
 #include "net/net_fake.h"
+#include "net/net_save.h"
 #include "ow_wire.h"
 #include "platform/platform.h"
 
@@ -299,7 +300,11 @@ static union {
     ow_tp_result tp_result;
     ow_go_to go_to;
     ow_mod_done mod_done;
-} M;
+    ow_save_part save_part;     // saves and world state: net/net_save.c reads them
+    ow_world_part world_part;
+    ow_world_set world_set;
+    ow_save_fix save_fix;
+} M;   // every s2c message this client handles needs a member: on_frame decodes into M
 
 static const ow_roster_row *row_of(uint64_t account) {
     for (int i = 0; i < C.nrows; i++)
@@ -667,6 +672,13 @@ static void on_mod_done(void) {
 // One frame from the server. Returns END_NONE to go on, or how the connection ends.
 static int on_frame(const ow_frame *f, unsigned gen) {
     (void)gen;
+    // ow_decode clears and fills the whole struct of the message's type: a type without a member in M would write
+    // past it, so such a message (an add-on this client has no handler for yet) is skipped unread.
+    const ow_msg_info *mi = ow_msg(f->type);
+    if (mi && mi->desc && mi->desc->size > sizeof M) {
+        rt_log("net: %s has no room in the client's message buffer; skipped", mi->name);
+        return END_NONE;
+    }
     int e = ow_decode(f->type, f->payload, f->len, &M);
     if (e) {
         snprintf(C.why, sizeof C.why, "The server sent something this game could not read (%s).", ow_strerror(e));
@@ -684,7 +696,7 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         plat_mutex_lock(&S.mx);
         uint8_t ch = S.character;
         plat_mutex_unlock(&S.mx);
-        e = ow_hs_client_challenge(&C.hs, &M.challenge, C.have_pin ? C.pin : NULL, &C.id, nick, ch, claim, OW_FEAT_CORE, &pr);
+        e = ow_hs_client_challenge(&C.hs, &M.challenge, C.have_pin ? C.pin : NULL, &C.id, nick, ch, claim, OW_FEAT_CORE | OW_FEAT_SAVES, &pr);
         if (!e) e = ow_hs_seal(&C.hs, &C.link);
         ow_hs_wipe(&C.hs);
         wipe(claim, sizeof claim);
@@ -716,12 +728,14 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         C.resumed_once = M.admit.resumed;
         C.admitted = 1;
         C.phase = P_JOINING;
+        net_save_admitted((M.admit.features & OW_FEAT_SAVES) != 0);
         rt_log("net: admitted as %s (account %llu)%s", M.admit.nickname, (unsigned long long)C.account,
                M.admit.resumed ? ", session resumed" : "");
         break;
     case OW_T_join_ready:
         if (C.phase != P_JOINING) break;
         C.phase = P_LIVE;
+        net_save_joined();
         C.sent_any = C.area_sent = 0;
         C.next_pos = 0;
         pub_state(NET_ONLINE, "");
@@ -792,6 +806,10 @@ static int on_frame(const ow_frame *f, unsigned gen) {
         break;
     }
     case OW_T_mod_done: on_mod_done(); break;
+    case OW_T_save_part:
+    case OW_T_world_part:
+    case OW_T_world_set:
+    case OW_T_save_fix: net_save_on_msg(f->type, &M); break;
     default: break;   // markers and the rest have no place in this release's UI
     }
     return END_NONE;
@@ -970,6 +988,7 @@ static int attempt(unsigned gen) {
         if (C.phase == P_LIVE) {
             send_commands();
             send_reports(now);
+            net_save_pump(now, send_msg);
         }
         if (C.phase >= P_JOINING && now >= C.next_ping) {
             ow_ping p = {.seq = ++C.ping_seq, .sent_us = now};
@@ -1050,6 +1069,7 @@ static void session(unsigned gen) {
     }
     pin_load();
     rt_log("net: connecting to %s", C.addr_key);
+    net_save_connecting();
     uint64_t lost_at = 0;
     for (;;) {
         int r = attempt(gen);
@@ -1084,6 +1104,7 @@ static void session(unsigned gen) {
             break;
         }
     }
+    net_save_offline();
     ow_identity_wipe(&C.id);
 }
 

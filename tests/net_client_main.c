@@ -40,6 +40,7 @@
 #include "cfg.h"
 #include "host.h"
 #include "net/net_client.h"
+#include "net/net_save.h"
 #include "platform/platform.h"
 
 void net_test_drop(void);
@@ -294,6 +295,42 @@ static int run(char *line) {
         char area[NET_AREA_MAX];
         snprintf(area, sizeof area, "Surface (%d, %d)", (int)p[0], (int)p[2]);
         net_set_local(area, p, "Link");
+    } else if (!strcmp(cmd, "gdwrite") || !strcmp(cmd, "gdput")) {
+        // gdwrite|gdput <key hex> <index> <kind> <value hex>: a GameData write the hooks caught, or a feature's put
+        NetSaveValue v;
+        memset(&v, 0, sizeof v);
+        unsigned key = 0, index = 0, kind = 0;
+        char hex[600] = "";
+        sscanf(line, "%*s %x %u %u %599s", &key, &index, &kind, hex);
+        v.key = key, v.index = (uint16_t)index, v.kind = (uint8_t)kind;
+        for (size_t i = 0; hex[2 * i] && hex[2 * i + 1] && i < NET_SAVE_VALUE_MAX; i++) {
+            unsigned byte;
+            sscanf(hex + 2 * i, "%2x", &byte);
+            v.v[v.len++] = (uint8_t)byte;
+        }
+        if (!strcmp(cmd, "gdput")) ret(cmd, net_save_put(&v));
+        else net_save_game_wrote(&v), ret(cmd, 1);
+    } else if (!strcmp(cmd, "gdtake")) {
+        // everything the game would take at its next commit, as {"ev":"gd","list":[[key,index,kind,"hex"],...]}
+        static NetSaveValue in[64];
+        printf("{\"ev\":\"gd\",\"list\":[");
+        int first = 1, n;
+        while ((n = net_save_take_incoming(in, 64)) > 0)
+            for (int i = 0; i < n; i++) {
+                printf("%s[%u,%u,%u,\"", first ? "" : ",", in[i].key, in[i].index, in[i].kind);
+                for (int j = 0; j < in[i].len; j++) printf("%02x", in[i].v[j]);
+                printf("\"]");
+                first = 0;
+            }
+        printf("],\"snapshot_done\":%d}\n", net_save_snapshot_done());
+    } else if (!strcmp(cmd, "gdget")) {
+        unsigned key = 0, index = 0;
+        sscanf(line, "%*s %x %u", &key, &index);
+        NetSaveValue v;
+        int r = net_save_get(key, (uint16_t)index, &v);
+        printf("{\"ev\":\"gdget\",\"found\":%d,\"hex\":\"", r);
+        for (int j = 0; r && j < v.len; j++) printf("%02x", v.v[j]);
+        printf("\",\"shared\":%d}\n", net_save_shared(key));
     } else if (!strcmp(cmd, "drop")) {
         net_test_drop();
     } else if (!strcmp(cmd, "dump")) {

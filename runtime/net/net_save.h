@@ -1,9 +1,8 @@
 // Saves and world state on the client (docs/online-saves.md): the contract between the GameData hooks, the network
 // client and other online features (wallet, ledger, Blood Moon) that read or change the player's own values.
 //
-// STATUS: contract only. net_save.c, the hooks on the game's GameData write path and the net_client.c wiring are the
-// next step (docs/online-saves.md, "Not done yet"); until they land, nothing implements these functions and nothing
-// in the build includes this header.
+// Implemented by runtime/net/net_save.c. The GameData hooks that call the hook functions are not in yet
+// (docs/online-saves.md, "Not done yet"): until they land the game neither sends its writes nor takes the server's.
 //
 // Values. A value is one GameData entry: key hash (u32), array index (0xFFFF for a scalar), an OW_GD_* kind and up to
 // 256 little-endian bytes, exactly the wire's gd_entry. Every key is either the player's own (hearts, stamina, pouch,
@@ -62,5 +61,20 @@ int net_save_take_incoming(NetSaveValue *out, int max);
 // 1 once the whole join snapshot (every save_part and world_part) has arrived: the title waits for it before it hands
 // over to the world, so the game starts from the account's save.
 int net_save_snapshot_done(void);
+
+// ---- for net_client.c (the network thread)
+
+// A connection attempt starts: net_save_snapshot_done says 0 until the join's snapshot is in or the attempt ends.
+void net_save_connecting(void);
+// The server admitted this game; granted says whether it granted OW_FEAT_SAVES.
+void net_save_admitted(int granted);
+// One s2c message of the saves add-on (save_part, world_part, world_set, save_fix); 1 when it was one of them.
+int net_save_on_msg(uint16_t type, const void *msg);
+// join_ready arrived: the snapshot is complete.
+void net_save_joined(void);
+// While live, on every pass of the client's loop: sends the due save_write / world_write batch through send.
+void net_save_pump(uint64_t now_us, int (*send)(uint16_t type, const void *msg));
+// The connection ended or was stopped. Writes not yet sent are dropped: the next join's snapshot decides.
+void net_save_offline(void);
 
 #endif

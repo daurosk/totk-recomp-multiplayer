@@ -50,7 +50,8 @@ def build_client(out):
     """tests/net_client_main.c with the client, the fake, the wire and Monocypher; returns the program's path."""
     out.mkdir(parents=True, exist_ok=True)
     exe = out / ('net_client_main' + ('.exe' if sys.platform == 'win32' else ''))
-    srcs = [ROOT / 'runtime/net/net_client.c', ROOT / 'runtime/net/net_stub.c', ROOT / 'tests/net_client_main.c']
+    srcs = [ROOT / 'runtime/net/net_client.c', ROOT / 'runtime/net/net_save.c', ROOT / 'runtime/net/net_stub.c',
+            ROOT / 'tests/net_client_main.c']
     srcs += sorted((ROOT / 'online/proto').glob('*.c')) + sorted((ROOT / 'online/third_party/monocypher').glob('*.c'))
     flags = ['-std=gnu11', '-Wall', '-Wextra', '-O1', '-g', '-I', str(ROOT / 'runtime'), '-I', str(ROOT / 'online/proto')]
     libs = ['-lws2_32', '-lbcrypt'] if sys.platform == 'win32' else ['-pthread']
