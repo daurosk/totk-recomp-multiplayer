@@ -261,36 +261,43 @@ static int hook_on(void) {
 const NaGame *na_game(void) { return hook_on() ? &game_121 : NULL; }
 
 #ifdef HOST_ACTORS_FRAME
-// One step of the sync core, at most every 15 ms and on the first thread that ran the hook (the core keeps one thread,
-// net_actors.h), then the root update's displaced `ldr x0, [x0, #0xa8]` (main+0xb36948). The game calls of the step
+// One step of the sync core at most every 15 ms, then the root update's displaced `ldr x0, [x0, #0xa8]`
+// (main+0xb36948). The root update runs on several of the game's threads (a two-game round saw one thread fall to about
+// one call a second after the load while the others ran 10 to 50 a second), so any of them may step, one at a time:
+// the core then sees one thread at a time, which is what net_actors.h needs of its callers. The game calls of the step
 // change registers the root update still holds (x1 among them), so every register is put back before the load.
 static void actors_frame(Cpu *c) {
-    static _Atomic uint32_t owner_tid;
-    static uint64_t last_ns, log_ns, calls, steps, other;
-    uint32_t tid = plat_thread_id(), none = 0;
-    uint64_t now = plat_now_ns();
-    int mine = atomic_compare_exchange_strong(&owner_tid, &none, tid) || none == tid;
-    if (!mine) other++;
-    else if (++calls, now - log_ns >= 10000000000ull) {   // a line every 10 s: how often and where it ran, what it did
-        NalStats ls;
-        nal_stats(&ls);
-        const NaStats *s = nal_core_stats();
-        rt_log("actors: frame hook %llu calls (%llu steps, %llu on other threads) on thread %u; live %d, in %u out %u "
-               "dropped %u/%u bad %u; owned %u copies %u offers %u poses %u gone in %u out %u removed %u",
-               (unsigned long long)calls, (unsigned long long)steps, (unsigned long long)other, tid, ls.live, ls.in,
-               ls.out, ls.in_dropped, ls.out_dropped, ls.bad, s ? s->owned : 0, s ? s->copies : 0, s ? s->offers : 0,
-               s ? s->poses : 0, s ? s->gones_in : 0, s ? s->gones_out : 0, s ? s->removed : 0);
-        log_ns = now, calls = steps = other = 0;
-    }
-    if (mine && now - last_ns >= 15000000u) {
-        static _Thread_local Cpu saved;
-        steps++;
-        last_ns = now;
-        memcpy(&saved, c, sizeof saved);
-        hook_cpu = c;
-        nal_tick(NULL);
-        hook_cpu = NULL;
-        memcpy(c, &saved, sizeof saved);
+    static atomic_flag busy = ATOMIC_FLAG_INIT;
+    static _Atomic uint64_t calls;
+    static uint64_t last_ns, log_ns, steps, threads_seen, last_tid;   // under busy
+    atomic_fetch_add_explicit(&calls, 1, memory_order_relaxed);
+    if (!atomic_flag_test_and_set_explicit(&busy, memory_order_acquire)) {
+        uint64_t now = plat_now_ns();
+        uint32_t tid = plat_thread_id();
+        if (tid != last_tid) threads_seen++, last_tid = tid;
+        if (now - last_ns >= 15000000u) {
+            static Cpu saved;
+            steps++;
+            last_ns = now;
+            memcpy(&saved, c, sizeof saved);
+            hook_cpu = c;
+            nal_tick(NULL);
+            hook_cpu = NULL;
+            memcpy(c, &saved, sizeof saved);
+        }
+        if (now - log_ns >= 10000000000ull) {   // a line every 10 s: how often it ran, what the core did
+            NalStats ls;
+            nal_stats(&ls);
+            const NaStats *s = nal_core_stats();
+            rt_log("actors: frame hook %llu calls, %llu steps, %llu thread changes; live %d, in %u out %u dropped %u/%u "
+                   "bad %u; owner msgs %u copy msgs %u offers %u poses %u gone in %u out %u removed %u",
+                   (unsigned long long)atomic_exchange(&calls, 0), (unsigned long long)steps,
+                   (unsigned long long)threads_seen, ls.live, ls.in, ls.out, ls.in_dropped, ls.out_dropped, ls.bad,
+                   s ? s->owned : 0, s ? s->copies : 0, s ? s->offers : 0, s ? s->poses : 0, s ? s->gones_in : 0,
+                   s ? s->gones_out : 0, s ? s->removed : 0);
+            log_ns = now, steps = threads_seen = 0;
+        }
+        atomic_flag_clear_explicit(&busy, memory_order_release);
     }
     memcpy(&c->x[0], (const void *)(uintptr_t)(c->x[0] + 0xa8), 8);
 }

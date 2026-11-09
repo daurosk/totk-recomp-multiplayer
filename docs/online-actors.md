@@ -99,6 +99,23 @@ body. The owner's states move it on every other screen (keyframed, so the copy's
 and the owner's gone takes it out everywhere through the game's own removal. An enemy copy is moved the same way but
 keeps its own AI until the AI switch is found, so it will twitch between its own steps and the owner's.
 
+### Two-game rounds (1.2.1, 2026-11-08)
+
+Two games of this branch's build and the server of this branch on 127.0.0.1, each game on its own copy of the test
+profile with its own key, the first save (the player near (-114, 128, 186)), no input after the load, 150 s,
+`TOTK_ACTORS_SYNC=1`, windows on the second monitor (`TOTK_TEST_WINDOW` 0 and 1).
+
+- First round, with the step pinned to the first thread that ran the hook: both games admitted, 17 offers each, 40 and
+  58 actors made copies, about 30 owned each, 1,000 and 460 states sent, no crash, no removal. The root update runs on
+  several of the game's threads: the pinned thread fell to about one call a second after the load while the others ran
+  10 to 50, so the core stepped about once a second. Hence the step now runs on any of them, one at a time.
+- Third round (the second never reached the world: the build had no shader translator; `TOTK_XLATE` fixed that): the
+  hook ran 600 times every 10 s and stepped about 590 times on each game (it moves between threads about 100 times in
+  that time), 10,200 frames on each game at 60 per second, 32 and 46 copies, about 5,000 states sent by each, `gone`
+  as unloaded 4 times, no crash, no shader failure. The pictures at the end show both games at the same place with
+  nothing out of place. Nothing was moved or hit by a player, so whether a moved object follows on the other screen is
+  not shown yet.
+
 ## Answered by the server side (docs/online-wire.md 9.1)
 
 1. Every name hash is FNV-1a 32 of the UTF-8 name (`ow_name_hash`).
