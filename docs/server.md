@@ -158,6 +158,7 @@ Players have a few chat commands of their own: `/who`, `/teams`, `/motd` and `/h
 | `moderators.txt` | one key per line |
 | `bans.txt`, `mutes.txt` | key, end time (seconds since 1970, 0 for until lifted), reason |
 | `claims.txt` | unused one-time claim codes |
+| `economy.txt` | rupees of every account, what each spent of the shared Lights and Korok seeds, and every Light and seed found |
 | `server.log` | everything the console shows: joins, leaves, chat (unless `log_chat = false`), host tools, refusals |
 
 All are plain text. Edit them only while the server is stopped (or use `reload` for bans, mutes and moderators):
@@ -190,6 +191,10 @@ the server rewrites the lists when they change. To move a server, copy the whole
 | `action_burst`, `action_per_second` | `10`, `2.0` | the same for team, teleport, marker and host requests |
 | `frame_burst`, `frames_per_second` | `200`, `60.0` | messages of any kind; a game over this is disconnected |
 | `log_chat` | `true` | write chat lines to `server.log` |
+| `afk_seconds` | `300` | seconds without moving, chatting or acting before the player list marks a player away; `0` for never |
+| `start_rupees` | `0` | rupees a new account starts with |
+| `wallet_earn_max` | `5000` | the most rupees one request may add |
+| `wallet_earn_per_minute` | `20000` | the most rupees an account may gain in a minute |
 
 Friends behind one router share an address: raise `max_per_ip` and `max_pending_per_ip` to the number of them.
 
@@ -208,8 +213,31 @@ two messages is encrypted, and both sides prove their keys.
 ## Add-ons
 
 The protocol has room for add-ons (shared saves, other players' bodies, companions and more), negotiated when a game
-signs in. This release of the server offers none, so every game gets the core only, whatever it asks for; a server
-with an add-on will say so here.
+signs in. A game gets the add-ons it offers that this server has; the rest of its offer is answered with nothing.
+This server has the economy and the sky clock, described next.
+
+## The economy
+
+A game that offers the `economy` add-on is told its rupees and the ledger when it joins, and again whenever they
+change. The server decides; a game's change is a request.
+
+- **Rupees** belong to an account (`economy.txt`). A request to change them is accepted or cut down: a spend that
+  adds or an earn that takes does nothing, a take is at most the balance, a gain is at most `wallet_earn_max` and at
+  most what is left of `wallet_earn_per_minute`, and the balance stays between 0 and 999999. The answer carries the
+  change that was applied, so a game can put its pouch right.
+- **Lights of Blessing and Korok seeds** are counted once for the whole room: a Light or seed any player finds,
+  named by its game key, counts for every player's ledger. What a player spends is that player's own and never more
+  than the room has found. A player may report 20 new finds at once and 2 each second; the ledger keeps at most 2048
+  of each kind.
+
+The `sky` add-on makes one Blood Moon for the room. The leader is the player who joined first of those here now; when
+they leave, the next to have joined leads and everyone is told. Only the leader's clock (day, hour of the day, Blood
+Moon due) is passed on; a clock from anyone else, or with an hour outside 0 to 24, is dropped. A game that joins is
+told the clock and who leads (while no clock has come yet, `sky_set` carries the day 4294967295 and only names the
+leader).
+
+The player list marks a player away (`afk`) after `afk_seconds` without moving, chatting or a request such as a
+team or teleport request, and for as long as the player's connection is held; the mark goes when they act again.
 
 ## Checking a server
 

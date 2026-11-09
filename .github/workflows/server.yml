@@ -2,9 +2,9 @@ name: Server
 
 on:
   push:
-    paths: ["server/**", "online/**", "tools/net_bot.c", "tools/build_server.py", "tests/net_server_check.py", "tests/actor_lab.py", "tests/actor_lab.c", "tests/actor_cases/**", "tests/actor_server_check.py", "runtime/net/**", "tests/net_client_check.py", "tests/net_client_main.c", ".github/workflows/server.yml"]
+    paths: ["server/**", "online/**", "tools/net_bot.c", "tools/build_server.py", "tests/net_server_check.py", "tests/net_server_economy_check.py", "tests/actor_lab.py", "tests/actor_lab.c", "tests/actor_cases/**", "tests/actor_server_check.py", "runtime/net/**", "tests/net_client_check.py", "tests/net_client_main.c", ".github/workflows/server.yml"]
   pull_request:
-    paths: ["server/**", "online/**", "tools/net_bot.c", "tools/build_server.py", "tests/net_server_check.py", "tests/actor_lab.py", "tests/actor_lab.c", "tests/actor_cases/**", "tests/actor_server_check.py", "runtime/net/**", "tests/net_client_check.py", "tests/net_client_main.c", ".github/workflows/server.yml"]
+    paths: ["server/**", "online/**", "tools/net_bot.c", "tools/build_server.py", "tests/net_server_check.py", "tests/net_server_economy_check.py", "tests/actor_lab.py", "tests/actor_lab.c", "tests/actor_cases/**", "tests/actor_server_check.py", "runtime/net/**", "tests/net_client_check.py", "tests/net_client_main.c", ".github/workflows/server.yml"]
 
 jobs:
   linux:
@@ -16,6 +16,7 @@ jobs:
           python-version: "3.12"
       - run: sudo apt-get install -y clang
       - run: CC=clang python tests/net_server_check.py
+      - run: CC=clang python tests/net_server_economy_check.py
       # The actors add-on: the owner rules' replay lab on a virtual clock, then the add-on through the real server.
       - run: CC=clang python tests/actor_lab.py
       - run: CC=clang python tests/actor_server_check.py
@@ -38,6 +39,7 @@ jobs:
           install: mingw-w64-ucrt-x86_64-clang
       - run: Add-Content $env:GITHUB_PATH 'C:\msys64\ucrt64\bin'
       - run: python tests/net_server_check.py
+      - run: python tests/net_server_economy_check.py
       - run: python tests/actor_lab.py
       - run: python tests/actor_server_check.py
       - run: python tests/net_client_check.py

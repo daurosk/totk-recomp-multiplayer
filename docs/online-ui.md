@@ -121,7 +121,23 @@ velocity together. `kSlots` stays as the list of copies written, each only when 
 
 Section `[online]` of `totk.ini` ([totk.ini.example](../totk.ini.example)): `net_name`, `net_address`,
 `net_autoconnect`, `net_key_chat`, `net_key_wheel`, `net_key_list`, `net_key_accept`, `net_key_refuse`, `net_pad_wheel`, `net_wheel_hold_ms`,
-`net_wheel_scale`, `net_chat_fade`, `net_chat_lines`, `net_fake`, `net_fake_role`.
+`net_wheel_scale`, `net_chat_fade`, `net_chat_lines`, `net_economy`, `net_loot`, `net_fake`, `net_fake_role`.
+
+`net_economy = 1` (off by default) makes the client offer the server's economy and sky add-ons ([server.md](server.md),
+"The economy"). The game side then uses the "shared economy" calls of `runtime/net/net_client.h`: `net_wallet_ask` and
+`net_wallet_get` for rupees (the server decides, an answer may be cut down), `net_ledger_find`, `net_ledger_spend` and
+`net_ledger_get` for the shared Lights of Blessing and Korok seeds, `net_sky_send`, `net_sky_get` and `net_sky_is_leader`
+for the Blood Moon leader's clock. They do nothing while `net_economy_on()` is 0 (switch off, no server, or a server
+without the add-ons). Nothing in the game calls them yet; the hooks into the game's pouch and clock come with the
+per-player key API.
+
+`net_loot = 1` (off by default) makes the client offer the actors add-on, which the release 1 server of this branch does
+not grant yet (the owner rules and the records are `online-wire.md`, 9.1). With it, a game that owns what made a drop
+(an enemy, a chest, a broken object) calls `net_loot_drop` once, so the drop exists once for the room as an item record
+with the maker as its parent (a fused drop is two drops, the weapon and the fuse part, each with its own id); the other games get a
+`NET_LOOT_SPAWNED` event from `net_loot_poll` and make the same thing. A game whose player picks a drop up calls
+`net_loot_take` and adds nothing to the pouch until a `NET_LOOT_TAKEN` event says `yours`; the others remove their copy.
+Every call does nothing while `net_loot_on()` is 0.
 
 ## Screenshots without input
 

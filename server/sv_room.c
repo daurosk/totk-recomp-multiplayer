@@ -17,9 +17,11 @@
  * Single-threaded: only sv_main.c's loop calls in here.
  */
 #include "sv.h"
+#include "sv_econ.h"
 #include "sv_actors.h"
 
 #include <ctype.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -87,6 +89,11 @@ typedef struct player {
     bucket chat, action;   /* kept across reconnects, so leaving and coming back does not refill them */
     uint32_t features;     /* the add-ons granted to its current connection */
     uint64_t warned;
+    uint64_t join_seq;     /* order of first joining, for the sky leader */
+    uint64_t active_at;    /* when the player last moved, spoke or acted */
+    int afk;               /* away: nothing from the player for afk_seconds */
+    bucket eco;            /* finds of Lights and seeds, which every player's ledger shows */
+    bucket sky;            /* clock updates from the leader */
 } player;
 
 typedef struct team {
@@ -114,6 +121,10 @@ static struct {
     team t[OW_TEAMS_MAX];
     uint32_t next_team;
     uint64_t team_seq;
+    uint64_t join_counter;
+    ow_sky_info sky_info;  /* the leader's last clock */
+    int sky_known;
+    uint64_t sky_leader;   /* account the players were last told leads; 0 for none */
     ip_entry ips[256];
     int roster_dirty, roster_soft, teams_dirty;
     unsigned refused;      /* connections refused at accept since the last log line about them */
@@ -151,6 +162,15 @@ static void conn_write(conn *c, uint16_t type, const void *msg) {
 }
 
 static int live(const player *p) { return p->used && p->conn >= 0; }
+
+/* The player did something a person does: it is no longer away. */
+static void active(player *p) {
+    p->active_at = G.now;
+    if (p->afk) {
+        p->afk = 0;
+        G.roster_dirty = 1;
+    }
+}
 
 static void send_to(player *p, uint16_t type, const void *msg) {
     if (live(p)) conn_write(G.c[p->conn], type, msg);
@@ -285,7 +305,7 @@ static void roster_of(ow_roster *r) {
         snprintf(w->nickname, sizeof w->nickname, "%s", p->nick);
         w->character = p->character;
         w->rank = p->rank;
-        w->afk = !live(p);
+        w->afk = !live(p) || p->afk;
         w->muted = (uint8_t)muted(p);
         w->team = p->team;
         w->area = p->area;
@@ -855,6 +875,107 @@ static void on_announce(player *p, const ow_announce *m) {
     sv_log("%s announced: %s", p->nick, text);
 }
 
+/* ---- economy and sky ---- */
+
+static int has_feature(const player *p, uint32_t f) { return live(p) && (p->features & f) == f; }
+
+static void send_wallet(player *p, uint32_t seq, uint32_t rupees, int32_t granted) {
+    ow_wallet w = { .seq = seq, .rupees = rupees, .granted = granted };
+    send_to(p, OW_T_wallet, &w);
+}
+
+static void send_ledger(player *p) {
+    sv_ledger_view v;
+    sv_ledger_get(p->account, &v);
+    ow_ledger l = { .lights_found = v.lights_found, .lights_spent = v.lights_spent, .seeds_found = v.seeds_found,
+                    .seeds_spent = v.seeds_spent };
+    send_to(p, OW_T_ledger, &l);
+}
+
+static void on_wallet_ask(player *p, const ow_wallet_ask *m) {
+    uint32_t rupees;
+    int32_t granted = sv_wallet_apply(p->account, m->cause, m->delta, G.now, &rupees);
+    if (granted != m->delta)
+        sv_log("%s: wallet change %d asked (cause %u), %d granted", p->nick, (int)m->delta, m->cause, (int)granted);
+    send_wallet(p, m->seq, rupees, granted);
+}
+
+static void on_ledger_note(player *p, const ow_ledger_note *m) {
+    switch (m->what) {
+    case OW_LEDGER_LIGHT_FOUND:
+    case OW_LEDGER_SEED_FOUND: {
+        if (!m->key) return;
+        /* Finds are shared by everyone, so a client may not stuff the ledger with invented ones. */
+        if (!take(&p->eco, 20, 2.0, G.now)) return;
+        int seed = m->what == OW_LEDGER_SEED_FOUND;
+        if (!sv_ledger_find(seed ? SV_LEDGER_SEED : SV_LEDGER_LIGHT, m->key)) {
+            send_ledger(p);
+            return;
+        }
+        sv_log("%s found %s %08x", p->nick, seed ? "a Korok seed" : "a Light of Blessing", m->key);
+        for (int i = 0; i < OW_PLAYERS_MAX; i++)
+            if (has_feature(&G.p[i], OW_FEAT_ECONOMY)) send_ledger(&G.p[i]);
+        break;
+    }
+    default: {
+        int seed = m->what == OW_LEDGER_SEED_SPENT;
+        uint32_t got = sv_ledger_spend(p->account, seed ? SV_LEDGER_SEED : SV_LEDGER_LIGHT, m->count);
+        if (got != m->count) sv_log("%s: spent %u asked, %u allowed", p->nick, m->count, got);
+        send_ledger(p);
+    }
+    }
+}
+
+/* The leader of the sky clock (and so of the Blood Moon): the player who joined first of those here now. */
+static player *sky_leader(void) {
+    player *best = NULL;
+    for (int i = 0; i < OW_PLAYERS_MAX; i++) {
+        player *p = &G.p[i];
+        if (has_feature(p, OW_FEAT_SKY) && (!best || p->join_seq < best->join_seq)) best = p;
+    }
+    return best;
+}
+
+/* Day SV_SKY_NONE says that nobody has sent a clock yet: the message then only tells who leads. */
+#define SV_SKY_NONE 0xFFFFFFFFu
+
+static void send_sky(player *to, uint64_t leader) {
+    ow_sky_set m = { .leader = leader, .info = G.sky_info };
+    if (!G.sky_known) m.info.day = SV_SKY_NONE;
+    send_to(to, OW_T_sky_set, &m);
+}
+
+/* Tells everyone who leads when that changed. Without a clock yet there is nothing to send. */
+static void sky_update_leader(void) {
+    player *l = sky_leader();
+    uint64_t now_leader = l ? l->account : 0;
+    if (now_leader == G.sky_leader) return;
+    G.sky_leader = now_leader;
+    if (l) sv_log("%s leads the sky clock", l->nick);
+    if (!l) return;
+    for (int i = 0; i < OW_PLAYERS_MAX; i++)
+        if (has_feature(&G.p[i], OW_FEAT_SKY)) send_sky(&G.p[i], now_leader);
+}
+
+static void on_sky(player *p, const ow_sky *m) {
+    if (!G.sky_leader || p->account != G.sky_leader) return; /* only the leader's clock counts */
+    if (!take(&p->sky, 10, 2.0, G.now)) return;
+    if (!(m->info.hour >= 0.0f && m->info.hour < 24.0f) || m->info.day > 1000000u) return;
+    G.sky_info = m->info;
+    G.sky_known = 1;
+    for (int i = 0; i < OW_PLAYERS_MAX; i++)
+        if (&G.p[i] != p && has_feature(&G.p[i], OW_FEAT_SKY)) send_sky(&G.p[i], p->account);
+}
+
+/* What a joining or returning game is told at once: its rupees, the ledger and the leader's clock. */
+static void send_economy_state(player *p) {
+    if (p->features & OW_FEAT_ECONOMY) {
+        send_wallet(p, 0, sv_wallet_get(p->account), 0);
+        send_ledger(p);
+    }
+    if ((p->features & OW_FEAT_SKY) && G.sky_leader) send_sky(p, G.sky_leader);
+}
+
 /* ---- the handshake ---- */
 
 static int nick_taken(const char *nick, const player *self) {
@@ -1027,6 +1148,7 @@ static void on_proof(conn *c, const ow_frame *f) {
         }
         p->account = acc->id;
         p->area.state = OW_PLACE_TITLE;
+        p->join_seq = ++G.join_counter;
     }
     if (!g_store.has_host) {
         sv_set_host(pr.identity);
@@ -1057,6 +1179,7 @@ static void on_proof(conn *c, const ow_frame *f) {
     /* The actors add-on knows only games that have it: one that resumes without it leaves the actors' room. */
     if ((p->features & OW_FEAT_ACTORS) && !(a.features & OW_FEAT_ACTORS)) sva_player_leave(p->account, G.now);
     p->features = a.features;
+    active(p);
     if (a.features & OW_FEAT_ACTORS) {
         sva_player_join(p->account, G.now);
         sva_player_area(p->account, &p->area, G.now);
@@ -1074,6 +1197,8 @@ static void on_proof(conn *c, const ow_frame *f) {
     conn_write(c, OW_T_positions, &pos);
     ow_join_ready jr = { 0, 0, roster.players_count };
     conn_write(c, OW_T_join_ready, &jr);
+    sky_update_leader();
+    send_economy_state(p);
     if (G.cfg.motd[0]) {
         ow_notice m;
         memset(&m, 0, sizeof m);
@@ -1135,7 +1260,10 @@ static void on_live(conn *c, const ow_frame *f) {
         }
         break;
     case OW_T_area:
-        if (memcmp(&p->area, &g_msg.area.where, sizeof p->area)) G.roster_soft = 1;
+        if (memcmp(&p->area, &g_msg.area.where, sizeof p->area)) {
+            G.roster_soft = 1;
+            active(p);
+        }
         p->area = g_msg.area.where;
         if (p->features & OW_FEAT_ACTORS) sva_player_area(p->account, &p->area, G.now);
         break;
@@ -1147,31 +1275,39 @@ static void on_live(conn *c, const ow_frame *f) {
         p->hearts_max_q = g_msg.vitals.hearts_max_q;
         p->fps = g_msg.vitals.fps;
         break;
-    case OW_T_position:
+    case OW_T_position: {
+        float dx = g_msg.position.pos[0] - p->pos[0], dy = g_msg.position.pos[1] - p->pos[1],
+              dz = g_msg.position.pos[2] - p->pos[2];
+        if (!p->has_pos || dx * dx + dy * dy + dz * dz > 0.25f || fabsf(g_msg.position.yaw - p->yaw) > 0.05f)
+            active(p);
         p->has_pos = 1;
         p->scene = g_msg.position.scene;
         memcpy(p->pos, g_msg.position.pos, sizeof p->pos);
         p->yaw = g_msg.position.yaw;
         if (p->features & OW_FEAT_ACTORS) sva_player_pos(p->account, p->scene, p->pos, G.now);
         break;
+    }
     case OW_T_character:
         if (p->character != g_msg.character.character) {
             p->character = g_msg.character.character;
             G.roster_dirty = 1;
         }
         break;
-    case OW_T_say: on_say(p, &g_msg.say); break;
-    case OW_T_mark: if (action_ok(p)) on_mark(p, &g_msg.mark); break;
-    case OW_T_team_create: if (action_ok(p)) on_team_create(p, &g_msg.team_create); break;
-    case OW_T_team_invite: if (action_ok(p)) on_team_invite(p, &g_msg.team_invite); break;
-    case OW_T_team_join: if (action_ok(p)) on_team_join(p, &g_msg.team_join); break;
-    case OW_T_team_leave: if (action_ok(p)) on_team_leave(p, &g_msg.team_leave); break;
-    case OW_T_team_kick: if (action_ok(p)) on_team_kick(p, &g_msg.team_kick); break;
-    case OW_T_tp_ask: if (action_ok(p)) on_tp_ask(p, &g_msg.tp_ask); break;
-    case OW_T_tp_reply: if (action_ok(p)) on_tp_reply(p, &g_msg.tp_reply); break;
-    case OW_T_summon: if (action_ok(p)) on_summon(p, &g_msg.summon); break;
-    case OW_T_mod_action: if (action_ok(p)) on_mod_action(p, &g_msg.mod_action); break;
-    case OW_T_announce: if (action_ok(p)) on_announce(p, &g_msg.announce); break;
+    case OW_T_say: active(p); on_say(p, &g_msg.say); break;
+    case OW_T_wallet_ask: on_wallet_ask(p, &g_msg.wallet_ask); break;
+    case OW_T_ledger_note: on_ledger_note(p, &g_msg.ledger_note); break;
+    case OW_T_sky: on_sky(p, &g_msg.sky); break;
+    case OW_T_mark: active(p); if (action_ok(p)) on_mark(p, &g_msg.mark); break;
+    case OW_T_team_create: active(p); if (action_ok(p)) on_team_create(p, &g_msg.team_create); break;
+    case OW_T_team_invite: active(p); if (action_ok(p)) on_team_invite(p, &g_msg.team_invite); break;
+    case OW_T_team_join: active(p); if (action_ok(p)) on_team_join(p, &g_msg.team_join); break;
+    case OW_T_team_leave: active(p); if (action_ok(p)) on_team_leave(p, &g_msg.team_leave); break;
+    case OW_T_team_kick: active(p); if (action_ok(p)) on_team_kick(p, &g_msg.team_kick); break;
+    case OW_T_tp_ask: active(p); if (action_ok(p)) on_tp_ask(p, &g_msg.tp_ask); break;
+    case OW_T_tp_reply: active(p); if (action_ok(p)) on_tp_reply(p, &g_msg.tp_reply); break;
+    case OW_T_summon: active(p); if (action_ok(p)) on_summon(p, &g_msg.summon); break;
+    case OW_T_mod_action: active(p); if (action_ok(p)) on_mod_action(p, &g_msg.mod_action); break;
+    case OW_T_announce: active(p); if (action_ok(p)) on_announce(p, &g_msg.announce); break;
     /* The actors add-on (sv_actors.c). The reader let these through only on a link that was granted it. */
     case OW_T_offer: case OW_T_release: case OW_T_actor_send: case OW_T_hold: case OW_T_hit: case OW_T_spawn:
     case OW_T_gone: case OW_T_group: case OW_T_herd: case OW_T_take:
@@ -1363,6 +1499,16 @@ static void timers(void) {
         positions_for(p, &pos);
         send_to(p, OW_T_positions, &pos);
     }
+    if (G.cfg.afk_seconds > 0)
+        for (int i = 0; i < OW_PLAYERS_MAX; i++) {
+            player *p = &G.p[i];
+            if (live(p) && !p->afk && now - p->active_at > (uint64_t)G.cfg.afk_seconds * SEC) {
+                p->afk = 1;
+                G.roster_dirty = 1;
+                sv_log("%s is away", p->nick);
+            }
+        }
+    sv_econ_tick(now);
     if (G.roster_soft) G.roster_dirty = 1;
     G.roster_soft = 0;
     if (G.refused && now - G.refused_logged > 10 * SEC) {
@@ -1373,6 +1519,7 @@ static void timers(void) {
 }
 
 static void send_dirty(void) {
+    sky_update_leader();
     if (G.teams_dirty) {
         static ow_teams t;
         teams_of(&t);
@@ -1414,6 +1561,7 @@ int sv_room_start(const sv_config *cfg) {
         return -1;
     }
     G.now = sv_now_us();
+    sv_econ_open(cfg);
     sva_io io = { .send = actors_send, .log = actors_log };
     sva_init(&io, INTEREST_M);
     return 0;
@@ -1482,6 +1630,7 @@ void sv_room_stop(void) {
         sv_sleep_ms(10);
     }
     sv_close(G.listener);
+    sv_econ_save();
 }
 
 /* ---- console ---- */

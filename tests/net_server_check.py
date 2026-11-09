@@ -293,7 +293,8 @@ def body_a(srv, bots, keys):
     a = bots.connect('alice', 'seedAlice', 'Alice', features=255)
     check(a.get('ev') == 'admit' and a['rank'] == 2 and a['resumed'] == 0, 'first account is admitted as the host')
     granted = a.get('features', -1)
-    check(granted >= 0 and not granted & ~255 and granted & 4, 'admit grants offered add-ons only, actors among them')
+    check(granted >= 0 and not granted & ~255 and granted & (4 | 16 | 64) == (4 | 16 | 64),
+          'admit grants offered add-ons only: actors, economy and sky among them')
     check(a.get('rules', {}).get('hold_ms') == 3000 and a['rules']['options'] & 2, 'admit carries the room rules')
     keys['alice'] = bots.keys.get('alice')
     check((srv.data / 'host.txt').read_text().strip() == keys['alice'], 'the first account is written to host.txt')
