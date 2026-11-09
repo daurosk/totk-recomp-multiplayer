@@ -755,10 +755,25 @@ void online_tags_layout(float w, float h, float scale) {
     if (net_state() != NET_ONLINE) return;
     float m[16];
     uint64_t age = 0;
-    if (!vk_camera_viewproj(m, &age) || age > TAG_CAM_STALE_NS) return;
+    int cam = vk_camera_viewproj(m, &age);
     static const int flip = rt_knob("PUPPET_TAG_FLIPY", "0");
     NetPuppet pp[NET_MAX_PLAYERS];
     int n = net_puppets(pp, NET_MAX_PLAYERS);
+    static double next_log;   // every 5 s: the camera and each puppet's projection, for checking tags in a log
+    if (now_s() >= next_log) {
+        next_log = now_s() + 5;
+        char line[512];
+        int o = snprintf(line, sizeof line, "puppets: tags: camera %d (%.0f ms old), %d puppets:", cam, (double)age / 1e6, n);
+        for (int i = 0; i < n && i < 6 && cam && o < (int)sizeof line - 64; i++) {
+            float c[4];
+            for (int r = 0; r < 4; r++)
+                c[r] = m[r * 4] * pp[i].pos[0] + m[r * 4 + 1] * (pp[i].pos[1] + TAG_HEIGHT) + m[r * 4 + 2] * pp[i].pos[2] + m[r * 4 + 3];
+            o += snprintf(line + o, sizeof line - o, " [%s w %.1f ndc %.2f %.2f]", pp[i].name, c[3], c[3] ? c[0] / c[3] : 0.0f,
+                          c[3] ? c[1] / c[3] : 0.0f);
+        }
+        rt_log("%s", line);
+    }
+    if (!cam || age > TAG_CAM_STALE_NS) return;
     if (n <= 0) return;
     ImDrawList *dl = ImGui::GetBackgroundDrawList();
     ImFont *font = ImGui::GetFont();

@@ -83,23 +83,38 @@ Main 1.2.1, read with capstone on the decompressed NSO (`recomp/nso.py`; the ext
   The localhost stream has almost no network jitter, so the 0.3 m figure needs a check with a delay-spike stream
   (add one to `net_bot` walk: hold sends for 150 ms now and then).
 
+## Done (third session, same branch)
+
+- Game side, commit f861b24: `runtime/puppet_self.c` (`puppet_self_frame`, called from `online_pump` in
+  `runtime/ui/online_ui.cpp`) reads the player actor each present: position +0x2b4, velocity by difference (warps over
+  30 m give 0), rotation from the 3x3 matrix at actor+0x290 when it checks as a rotation, else the direction of travel.
+  In game (1.2.1, fake network) the log said `puppets: local facing from the actor's rotation matrix` all run, so
+  +0x290 is the rotation on 1.2.1. `in_world` is 0 with no actor, out of the map or during our teleport. Not read yet:
+  animation, glide, ride (nanim 0).
+- Camera export, commit 29fe902: `runtime/vk_camera.c` (`vk_camera_draw` beside `vk_dlaa_draw` in
+  `runtime/vk_exec_draw.c`, `vk_camera_viewproj` for any thread, seqlock). Name tags: `online_tags_layout` in
+  `runtime/ui/online_ui.cpp` (background draw list, fade 40 to 120 m, hidden at clip w <= 0.3, stale camera 250 ms,
+  `TOTK_PUPPET_TAG_FLIPY`). A log line every 5 s, `puppets: tags: camera ... [name w .. ndc .. ..]`, gives each
+  puppet's projection.
+- Delay spikes, commit 0fdb7a4: `tools/net_bot.c` `walk ... [SPIKE_MS]`; `tests/net_client_check.py` checks a 150 ms
+  spike every 1.5 to 3 s: p95 0.185 m, delay 99 ms. Client check 0 failures; server check 0 failures.
+- Game runs (slot 0, `TOTK_NET_FAKE=1`, `tools/run_game.py build/v121 --env TOTK_TEST_WINDOW=0`, logs
+  `build/v121/logs/pup*.log`): the camera block is captured (1 ms old each frame). **The tag projection is not right
+  yet**: in pup4 the fake player Cleo, about 74 m north of the player (camera facing the castle, north), gave clip w
+  48.6 and NDC x 1.43 (expected about 75 and 0.5), so no tag was on screen. Next: dump the 0x940 block once (rows 0 to
+  15) with the player's and the puppets' positions, and try the transposed matrix and the other 4x4 runs in the block
+  (view, projection, inverse view) offline against the known positions; then fix the row read in
+  `vk_camera_draw`/`online_tags_layout`. `--shot` images do not include the overlay; `TOTK_NET_DEMO_DIR=<dir>` saves
+  swapchain shots with the UI.
+- Build in this worktree: `build/` copied from `totk-recomp-multiplayer-net`; build with
+  `tools/build_game.py --gen C:/Users/Caleb/Desktop/totk-recomp-multiplayer-ui/generated/v121 --romfs
+  C:/Users/Caleb/Desktop/P13/project/build/extracted/v121/romfs` (about 12 s, runtime only).
+
 ## Plan for the next session
 
-1. Game side of the client: each frame in the runtime (where `net_set_local` is called, `runtime/ui/online_ui.cpp`
-   `report_local`), read the player actor (`frame_step_player_actor()` in `runtime/frame_rate.c`, position at actor
-   +0x2b4, rotation and animation to probe), velocity by difference, and call `net_set_self`; `in_world` 0 during
-   loading screens and on the title screen.
-
-0. (done) Server: `sv_puppets.c`, grant `OW_FEAT_PUPPETS`, keep each player's last `self_state`, relay it as `player_state`
-   to live players whose area scene matches and whose state is playing, within `interest_m` of the sender's last
-   position, at most 20 a second per sender per viewer; drop on leave, title and loading. Tests in
-   `tests/net_server_check.py` with bots (`tools/net_bot.c` gains a moving puppet mode).
-0. (done) Client: offer the feature; each frame read the local player (pos, rotation, velocity by difference, animation
-   later), send `self_state` at 20 Hz; keep per-account sample buffers; smoothing; `net_puppets()` in
-   `net_client.h` (account, name, character, smoothed pos and yaw, anim) and a fake in `net_stub.c`. Tests in
-   `tests/net_client_check.py` against the server with moving bots, measuring the p95 error of the smoothed path.
-3. Name tags in `runtime/ui/online_ui.cpp` from the exported camera block.
-4. Body: find the sync create and its arg, spawn the stock `Player` model under a puppet actor (pack built from the
-   user's RomFS with the control and camera components left out, found by trying), drive it kinematically. Game
-   rounds only once `TOTK_TEST_WINDOW` is on `origin/net-client` (it was not at 98004dc).
-5. Map markers (probe), then the two-game round, the PR against main with tested and not-tested lists.
+1. Fix the tag projection (above), then check a tag on screen in a demo shot.
+2. Body: find the sync create and its arg, spawn the stock `Player` model under a puppet actor (pack built from the
+   user's RomFS into `build/`, control and camera components left out), drive it kinematically from `net_puppets`.
+3. Local animation for `NetSelf.anim` (probe the actor's animation state), glide and ride.
+4. Map markers (probe the map screen), then the two-game round with a server (slots 0 and 1, `game.lock`), and the PR
+   against main with tested and not-tested lists.
