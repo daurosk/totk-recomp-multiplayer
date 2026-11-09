@@ -4,13 +4,20 @@
 // reads in a row. The actor is looked up again every frame: a load that replaces it ends the move. Log lines
 // ("teleport: ...") report the target, the read-back of each frame while the move runs, and how it ended.
 #include <math.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "cfg.h"
+#include "dispatch.h"
 #include "host.h"
+#include "layout.h"
 #include "platform/platform.h"
 #include "teleport.h"
+
+#if __has_include("patches.h")
+#include "patches.h"
+#endif
 
 #define POS_OFF 0x2b4
 #define HOLD_FRAMES 90      // give up after this many presents
@@ -86,6 +93,119 @@ static void scan_copies(uint64_t actor, const float pos[3]) {
     rt_log("teleport: scanned %d objects, %d copies", n, hits);
 }
 
+// TOTK_TELEPORT_WATCH=<offset>: at a teleport request, writes nothing and instead arms a hardware write watchpoint on
+// the four bytes at actor+<offset> (hex) for WATCH_FRAMES presents, then logs each distinct writer as host offsets of
+// the executable (pc after the store, then its callers), to look up in build/<ver>/totk.map.
+#define WATCH_FRAMES 30
+#define WATCH_MAX 24
+static struct { uint64_t pcs[8]; int n; volatile int hits; } g_watch[WATCH_MAX];
+static volatile int g_watch_n;
+static int g_watch_left;
+
+static void watch_hit(const uint64_t *pcs, int n) {
+    int k = __atomic_load_n(&g_watch_n, __ATOMIC_ACQUIRE);
+    for (int i = 0; i < k; i++)
+        if (g_watch[i].n == n && !memcmp(g_watch[i].pcs, pcs, (size_t)(n < 4 ? n : 4) * 8)) {
+            __atomic_add_fetch(&g_watch[i].hits, 1, __ATOMIC_RELAXED);
+            return;
+        }
+    int slot = __atomic_fetch_add(&g_watch_n, 1, __ATOMIC_ACQ_REL);
+    if (slot >= WATCH_MAX) return;
+    memcpy(g_watch[slot].pcs, pcs, (size_t)n * 8);
+    g_watch[slot].n = n;
+    g_watch[slot].hits = 1;
+}
+
+static void watch_report(void) {
+    plat_watch_write(0, 0, NULL);
+    uint64_t base = plat_exe_base();
+    int k = g_watch_n < WATCH_MAX ? g_watch_n : WATCH_MAX;
+    rt_log("teleport: watch saw %d writers", g_watch_n);
+    for (int i = 0; i < k; i++) {
+        char line[256];
+        int o = snprintf(line, sizeof line, "%d hits:", g_watch[i].hits);
+        for (int j = 0; j < g_watch[i].n && o < (int)sizeof line - 20; j++)
+            o += snprintf(line + o, sizeof line - o, " %llx", (unsigned long long)(g_watch[i].pcs[j] - base));
+        rt_log("teleport: watch %s", line);
+    }
+}
+
+// ---- the set-transform hook (recomp/patches-v121.txt "teleport"): main+0x82133c calls the actor's set-transform with
+// the matrix x26 points to; the host callback at page +0xf60 makes that load and, for the actor held here, passes a copy
+// with the target translation instead (row-major 3x4, translation in elements 3, 7 and 11).
+#define HOST_TELEPORT_SET (RT_PATCH_PAGE + 0xf60)
+#define HOOK_MTX_OFF 0xe00
+static uint64_t g_hook_actor;   // __atomic builtins: written on the present thread, read by the guest
+static float g_hook_pos[3];
+static int g_hook_hits;
+
+static uint64_t read_p(uint64_t a) {
+    uint64_t p = 0;
+    return a && plat_mem_read(a, &p, 8) && p >= 0x10000 ? p : 0;
+}
+static uint64_t player_body(uint64_t actor);
+// The physics world the body lives in, as main+0xaa9b90 finds it: [[[main+0x462e038]] +0xc8 + 8 * (B+0x68 bit 5)]
+// +0xc0, then +0xe0. Its vtable +0x1d0 (world, body id [H+8]) returns the body's linear velocity, writable in place.
+#define WORLD_LINEAR_VELOCITY 0x1d0
+static uint64_t body_world(uint64_t body) {
+    uint64_t flags = 0, g = read_p(read_p(MOD_MAIN_BASE + 0x462e038));
+    if (!g || !plat_mem_read(body + 0x68, &flags, 8)) return 0;
+    uint64_t w = read_p(g + 0xc8);
+    w = w ? read_p(w + ((flags >> 5) & 1) * 8 + 0xc0) : 0;
+    return w ? read_p(w + 0xe0) : 0;
+}
+#define BODY_SET_TRANSFORM 0xaa9b90   // main+: (body handle [B+0x70], const row-major 3x4 *, B)
+
+// Calls body_set_transform on this guest thread with a matrix built on the guest stack below sp; every register the
+// call may change is put back, so the interrupted code resumes as it was.
+static void push_body(Cpu *c, uint64_t body, const float pos[3]) {
+    uint64_t handle = read_p(body + 0x70);
+    if (!handle) return;
+    float m[12];
+    memcpy(m, (const void *)(uintptr_t)(body + 0x98), sizeof m);
+    m[3] = pos[0], m[7] = pos[1], m[11] = pos[2];
+    static __thread Cpu saved;
+    memcpy(&saved, c, sizeof saved);
+    c->sp = (c->sp - 0x100) & ~15ull;
+    memcpy((void *)(uintptr_t)c->sp, m, sizeof m);
+    rt_call(c, MOD_MAIN_BASE + BODY_SET_TRANSFORM, 3, handle, c->sp, body);
+    uint64_t world = body_world(body), id = 0, get_vel = world ? read_p(read_p(world) + WORLD_LINEAR_VELOCITY) : 0;
+    plat_mem_read(handle + 8, &id, 4);
+    if (get_vel) {
+        uint64_t v = rt_call(c, get_vel, 2, world, id);
+        if (v >= 0x10000) memset((void *)(uintptr_t)v, 0, 12);
+    }
+    memcpy(c->x, saved.x, sizeof c->x);
+    memcpy(c->v, saved.v, sizeof c->v);
+    c->sp = saved.sp, c->nzcv = saved.nzcv, c->pc = saved.pc;
+    float *t = (float *)(uintptr_t)(body + 0x98);
+    t[3] = pos[0], t[7] = pos[1], t[11] = pos[2];
+}
+
+static void set_transform_hook(Cpu *c) {
+    c->x[1] = c->x[26];
+    uint64_t want = __atomic_load_n(&g_hook_actor, __ATOMIC_ACQUIRE);
+    if (!want || c->x[0] != want || !c->x[26]) return;
+    uint64_t body = player_body(want);
+    if (body) push_body(c, body, g_hook_pos);
+    float *m = (float *)(uintptr_t)(RT_PATCH_PAGE + HOOK_MTX_OFF);
+    memcpy(m, (const void *)(uintptr_t)c->x[26], 48);
+    m[3] = g_hook_pos[0], m[7] = g_hook_pos[1], m[11] = g_hook_pos[2];
+    c->x[1] = (uint64_t)(uintptr_t)m;
+    __atomic_add_fetch(&g_hook_hits, 1, __ATOMIC_RELAXED);
+}
+
+__attribute__((constructor)) static void teleport_register(void) { rt_register_host(HOST_TELEPORT_SET, set_transform_hook); }
+
+// The player's physics body: [[[actor+0x228]+0x50]+0x20] is the object main+0x8250f8 reads the transform from, its
+// +0x150 the body whose +0x98 holds it as a row-major 3x4 matrix. 0 when a link is missing.
+static uint64_t player_body(uint64_t actor) {
+    uint64_t p = read_p(actor + 0x228);
+    p = p ? read_p(p + 0x50) : 0;
+    p = p ? read_p(p + 0x20) : 0;
+    return p ? read_p(p + 0x150) : 0;
+}
+
 static int in_world(const float p[3]) {
     // TotK's map is about 10 km wide (x and z within +-5000); the sky islands reach 1500 m up and the Depths 1200 m down
     return isfinite(p[0]) && isfinite(p[1]) && isfinite(p[2]) && fabsf(p[0]) <= 5100.f && fabsf(p[2]) <= 5100.f &&
@@ -104,8 +224,30 @@ int teleport_to(const float xyz[3]) {
     g_frames_left = HOLD_FRAMES;
     g_wait = g_settled = 0;
     rt_log("teleport: to %.1f %.1f %.1f", xyz[0], xyz[1], xyz[2]);
-    const char *scan = cfg_get("TOTK_TELEPORT_SCAN");
+    const char *scan = cfg_get("TOTK_TELEPORT_SCAN"), *watch = cfg_get("TOTK_TELEPORT_WATCH");
     uint64_t a = frame_step_player_actor();
+    if (a && cfg_get("TOTK_TELEPORT_VT")) {
+        uint64_t b = player_body(a), flags = 0, g = read_p(read_p(MOD_MAIN_BASE + 0x462e038));
+        plat_mem_read(b + 0x68, &flags, 8);
+        uint64_t w = g ? read_p(g + 0xc8) : 0;
+        w = w ? read_p(w + ((flags >> 5) & 1) * 8 + 0xc0) : 0;
+        w = w ? read_p(w + 0xe0) : 0;
+        uint64_t h = read_p(b + 0x70), vt = read_p(h);
+        uint32_t id = 0;
+        if (h) plat_mem_read(h + 8, &id, 4);
+        rt_log("teleport: body %llx flags %llx world %llx vt main+%llx id %x", (unsigned long long)b, (unsigned long long)flags,
+               (unsigned long long)w, (unsigned long long)(vt - MOD_MAIN_BASE), id);
+        for (int i = 0; vt && i < 0x30; i++) {
+            uint64_t f = read_p(vt + (uint64_t)i * 8);
+            rt_log("teleport: vt +%x main+%llx", i * 8, (unsigned long long)(f - MOD_MAIN_BASE));
+        }
+    }
+    if (a && watch && *watch) {
+        uint64_t at = (*watch == 'b' ? player_body(a) : a) + strtoull(watch + (*watch == 'b'), NULL, 16);
+        g_watch_n = 0;
+        g_watch_left = WATCH_FRAMES;
+        rt_log("teleport: watching writes to %llx: %s", (unsigned long long)at, plat_watch_write(at, 4, watch_hit) ? "armed" : "failed");
+    }
     float now[3];
     if (a && plat_mem_read(a + POS_OFF, now, 12)) {
         g_dyn_all = scan && !strcmp(scan, "all");
@@ -124,6 +266,7 @@ int teleport_to(const float xyz[3]) {
 int teleport_busy(void) { return g_active; }
 
 void teleport_frame(void) {
+    if (g_watch_left && !--g_watch_left) watch_report();
     if (!g_active) return;
     uint64_t a = frame_step_player_actor();
     if (!a || !plat_mem_readable(a + POS_OFF, 12)) {
@@ -135,6 +278,17 @@ void teleport_frame(void) {
     }
     float now[3];
     plat_mem_read(a + POS_OFF, now, 12);
+    if (cfg_get("TOTK_TELEPORT_HOOK")) {
+        int f = HOLD_FRAMES - g_frames_left, hold = atoi(cfg_get("TOTK_TELEPORT_HOOK"));
+        memcpy(g_hook_pos, g_target, sizeof g_hook_pos);
+        __atomic_store_n(&g_hook_actor, f < hold ? a : 0, __ATOMIC_RELEASE);
+        float v[3] = {0};
+        plat_mem_read(a + 0x338, v, 12);
+        rt_log("teleport: hook frame %d %s hits %d read %.2f %.2f %.2f vel %.2f %.2f %.2f", f, f < hold ? "hold" : "free",
+               g_hook_hits, now[0], now[1], now[2], v[0], v[1], v[2]);
+        if (--g_frames_left <= 0) g_active = 0, __atomic_store_n(&g_hook_actor, 0, __ATOMIC_RELEASE);
+        return;
+    }
     float d = hypotf(hypotf(now[0] - g_target[0], now[1] - g_target[1]), now[2] - g_target[2]);
     g_settled = d <= SETTLE_DIST ? g_settled + 1 : 0;
     if (HOLD_FRAMES - g_frames_left < 12)
@@ -155,4 +309,58 @@ void teleport_frame(void) {
             float v[3] = {g_target[0], g_target[1] + g_dyn[i].dy, g_target[2]};
             if (plat_mem_readable(g_dyn[i].addr, 12)) memcpy((void *)(uintptr_t)g_dyn[i].addr, v, 12);
         }
+}
+
+// TOTK_TELEPORT_TEST="<wait> <dx> <dy> <dz>; <wait> @<x> <y> <z>; ...": scripted moves for checks without input. Each
+// step waits <wait> presents after the player is resident and the previous move ended, then moves by the offset or,
+// with '@', to the position. With TOTK_TELEPORT_SHOTS=<dir>, the frame before each move is saved as <dir>/<n>-before.png
+// and the frame AFTER_SHOT presents after it ended as <dir>/<n>-after.png (menu.cpp menu_overlay_frame saves them).
+#define AFTER_SHOT 90
+static struct { int wait, abs; float v[3]; } g_test[16];
+static int g_test_n = -1, g_test_i, g_test_wait, g_test_after;
+static char g_shot[512];
+
+static void test_parse(void) {
+    g_test_n = 0;
+    const char *p = cfg_get("TOTK_TELEPORT_TEST");
+    while (p && *p && g_test_n < 16) {
+        char *e;
+        int w = (int)strtol(p, &e, 10);
+        if (e == p) break;
+        p = e;
+        while (*p == ' ') p++;
+        int abs = *p == '@';
+        if (abs) p++;
+        float v[3];
+        int ok = 1;
+        for (int k = 0; k < 3 && ok; k++) v[k] = strtof(p, &e), ok = e != p, p = e;
+        if (!ok) break;
+        g_test[g_test_n].wait = w, g_test[g_test_n].abs = abs, memcpy(g_test[g_test_n].v, v, sizeof v), g_test_n++;
+        while (*p == ' ' || *p == ';') p++;
+    }
+    if (g_test_n) rt_log("teleport: test script with %d moves", g_test_n);
+}
+
+const char *teleport_test_shot(void) {
+    if (g_test_n < 0) test_parse();
+    if (!g_test_n) return NULL;
+    const char *dir = cfg_get("TOTK_TELEPORT_SHOTS");
+    float now[3];
+    if (g_active || frame_step_world_us() < 0 || !teleport_player_pos(now)) return NULL;
+    if (g_test_after && !--g_test_after && dir) {
+        snprintf(g_shot, sizeof g_shot, "%s/%d-after.png", dir, g_test_i);
+        rt_log("teleport: test move %d ended at %.1f %.1f %.1f", g_test_i, now[0], now[1], now[2]);
+        return g_shot;
+    }
+    if (g_test_after || g_test_i >= g_test_n) return NULL;
+    if (++g_test_wait < g_test[g_test_i].wait) return NULL;
+    g_test_wait = 0;
+    float to[3];
+    for (int k = 0; k < 3; k++) to[k] = g_test[g_test_i].abs ? g_test[g_test_i].v[k] : now[k] + g_test[g_test_i].v[k];
+    g_test_i++;
+    rt_log("teleport: test move %d from %.1f %.1f %.1f: %s", g_test_i, now[0], now[1], now[2], teleport_to(to) ? "started" : "refused");
+    g_test_after = AFTER_SHOT;
+    if (!dir) return NULL;
+    snprintf(g_shot, sizeof g_shot, "%s/%d-before.png", dir, g_test_i);
+    return g_shot;
 }

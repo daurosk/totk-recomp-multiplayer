@@ -457,3 +457,9 @@ int plat_spawn(const char *const *argv, const char *cwd);
 // In a process plat_restart started: waits, at most timeout_ms, until the process that started it has exited. 1 after
 // the wait, -1 on timeout, 0 when there is nothing to wait for (not started by plat_restart, or that process is gone).
 int plat_restart_wait(uint32_t timeout_ms);
+
+// Debug data watchpoint (teleport.c TOTK_TELEPORT_WATCH): arms debug register 0 of every other thread of the process
+// on writes to the len bytes (1, 2, 4 or 8, aligned) at addr; each write is reported to fn on the writing thread,
+// inside the exception handler, with the host address after the writing instruction and of up to 7 callers. addr 0
+// disarms. 1 when armed on every thread. Windows only; elsewhere it returns 0.
+int plat_watch_write(uint64_t addr, int len, void (*fn)(const uint64_t *pcs, int n));

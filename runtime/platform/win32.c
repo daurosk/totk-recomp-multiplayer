@@ -9,6 +9,7 @@
 #include <psapi.h>
 #include <restartmanager.h>
 #include <shellapi.h>
+#include <tlhelp32.h>
 #include <timeapi.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -1871,3 +1872,58 @@ int plat_restart_wait(uint32_t timeout_ms) {
     CloseHandle(h);
     return r;
 }
+
+// ---- debug data watchpoint: DR0 on every thread, reported from a vectored handler (EXCEPTION_SINGLE_STEP, DR6 bit 0).
+static void (*watch_fn)(const uint64_t *pcs, int n);
+static volatile LONG watch_veh_added;
+
+static LONG CALLBACK watch_veh(EXCEPTION_POINTERS *ep) {
+    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP || !(ep->ContextRecord->Dr6 & 1) || !watch_fn)
+        return EXCEPTION_CONTINUE_SEARCH;
+    uint64_t pcs[8];
+    int n = 0;
+    CONTEXT c = *ep->ContextRecord;
+    pcs[n++] = c.Rip;   // a data breakpoint traps after the write: Rip is the next instruction
+    while (n < 8) {
+        DWORD64 base = 0;
+        PRUNTIME_FUNCTION f = RtlLookupFunctionEntry(c.Rip, &base, NULL);
+        if (!f) break;
+        void *hd = NULL;
+        DWORD64 est = 0;
+        RtlVirtualUnwind(UNW_FLAG_NHANDLER, base, c.Rip, f, &c, &hd, &est, NULL);
+        if (!c.Rip) break;
+        pcs[n++] = c.Rip;
+    }
+    watch_fn(pcs, n);
+    ep->ContextRecord->Dr6 = 0;
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
+int plat_watch_write(uint64_t addr, int len, void (*fn)(const uint64_t *pcs, int n)) {
+    if (addr) watch_fn = fn;
+    if (!InterlockedExchange(&watch_veh_added, 1)) AddVectoredExceptionHandler(1, watch_veh);
+    DWORD64 lenbits = len == 8 ? 2 : len == 4 ? 3 : len == 2 ? 1 : 0;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    THREADENTRY32 te = {.dwSize = sizeof te};
+    DWORD pid = GetCurrentProcessId(), self = GetCurrentThreadId();
+    int ok = 1;
+    for (BOOL more = Thread32First(snap, &te); more; more = Thread32Next(snap, &te)) {
+        if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
+        HANDLE h = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME, FALSE, te.th32ThreadID);
+        if (!h) { ok = 0; continue; }
+        if (SuspendThread(h) == (DWORD)-1) { CloseHandle(h); ok = 0; continue; }
+        CONTEXT c = {.ContextFlags = CONTEXT_DEBUG_REGISTERS};
+        if (GetThreadContext(h, &c)) {
+            c.Dr0 = addr;
+            c.Dr7 = addr ? (c.Dr7 & ~0xf0003ull) | 1 | (1ull << 16) | (lenbits << 18) : c.Dr7 & ~0xf0003ull;
+            if (!SetThreadContext(h, &c)) ok = 0;
+        } else ok = 0;
+        ResumeThread(h);
+        CloseHandle(h);
+    }
+    CloseHandle(snap);
+    if (!addr) watch_fn = NULL;
+    return ok;
+}
+

@@ -1595,6 +1595,7 @@ extern "C" int menu_overlay_frame(uint64_t frame, const MenuTarget *t, const cha
     if (open) layout_menu(t->width, t->height, scale);
     online_layout((float)t->width, (float)t->height, scale, open);
     if (const char *s = online_demo_shot(frame)) *shot = s;
+    if (const char *s = teleport_test_shot()) *shot = s;
     perf_draw(t, scale);
     ImGui::Render();
     if (open) g_save_pending = opt_save_tick(0);

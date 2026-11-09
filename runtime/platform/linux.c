@@ -1887,3 +1887,8 @@ int plat_restart_wait(uint32_t timeout_ms) {
     close(fd);
     return r;
 }
+
+int plat_watch_write(uint64_t addr, int len, void (*fn)(const uint64_t *pcs, int n)) {
+    (void)addr, (void)len, (void)fn;
+    return 0;
+}
