@@ -16,7 +16,7 @@ The wire's layout is unchanged: version 1, the same fingerprint. Section 9.1 add
 
 ## Where the rules come from
 
-The old port's rules (its SyncFix S1 stage and the M5 to M8 design) were read for behaviour and written anew in C:
+The old port's rules (its server's S1 stage and the M5 to M8 design) were read for behaviour and written anew in C:
 rule 1 is S1's orphans, rule 2 its "owner far" with a margin, rules 3 and 4 its "close" hold, rule 5 its still
 things, rule 7 its fight lock, rule 8 its parts, held objects and quest actors, rule 11 its contraption clusters. The
 numbers are S1's: 120 m, 5 m, 10 m, 5 s, 20 m, 20 s, 1 m in 5 s, 160 m, 6 s, 60 m, 12 m, 6 m.
