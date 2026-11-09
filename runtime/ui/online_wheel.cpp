@@ -457,55 +457,67 @@ void online_wheel_layout(float w, float h, float scale) {
 
     // ---- draw
     ImDrawList *dl = ImGui::GetForegroundDrawList();
-    dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), IM_COL32(0, 0, 0, (int)(120 * ease)));
+    dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), IM_COL32(0, 0, 0, (int)(130 * ease)));
     const float TAU = 6.2831853f, gap = 0.035f;
     float step = TAU / (float)n;
-    ImFont *font = ImGui::GetFont();
-    float fs = ImGui::GetFontSize();
+    ImFont *font = look_font();
+    float fs = 24 * scale;
+    const ImU32 cream = IM_COL32(246, 241, 224, 255), gold = IM_COL32(255, 226, 140, 255);
     for (int i = 0; i < n; i++) {
         float mid = -TAU / 4 + step * (float)i;   // up, clockwise
         float a0 = mid - step / 2 + gap / (n > 1 ? 1.0f : 100.0f), a1 = mid + step / 2 - gap / (n > 1 ? 1.0f : 100.0f);
         bool sel = i == W.sel, en = sl[(size_t)i].enabled;
-        ImVec2 dir(cosf(mid), sinf(mid)), off = sel ? ImVec2(dir.x * 12 * scale, dir.y * 12 * scale) : ImVec2(0, 0);
+        ImVec2 dir(cosf(mid), sinf(mid)), off = sel ? ImVec2(dir.x * 10 * scale, dir.y * 10 * scale) : ImVec2(0, 0);
         ImVec2 ci(c.x + off.x, c.y + off.y);
-        ImU32 fill = !en ? IM_COL32(26, 32, 30, 220) : sel ? IM_COL32(54, 128, 88, 245) : IM_COL32(18, 34, 28, 232);
+        // dark translucent slices like the game's own panels; the aimed one is lit warm cream with a bright edge
+        ImU32 fill = !en ? IM_COL32(14, 16, 16, 175) : sel ? IM_COL32(88, 82, 58, 215) : IM_COL32(9, 11, 11, 185);
         dl->PathArcTo(ci, R, a0, a1, 28);
         dl->PathArcTo(ci, r0, a1, a0, 20);
         dl->PathFillConcave(fill);
         dl->PathArcTo(ci, R, a0, a1, 28);
         dl->PathArcTo(ci, r0, a1, a0, 20);
-        dl->PathStroke(sel ? IM_COL32(237, 194, 84, 255) : IM_COL32(95, 115, 100, 160), ImDrawFlags_Closed, sel ? 3.5f * scale : 1.5f * scale);
+        dl->PathStroke(sel ? IM_COL32(255, 240, 180, 255) : IM_COL32(200, 194, 168, 110), ImDrawFlags_Closed, sel ? 3.0f * scale : 1.5f * scale);
         float rm = (r0 + R) * 0.5f;
         ImVec2 mc(ci.x + dir.x * rm, ci.y + dir.y * rm);
         float ir = R * 0.14f;
-        ImU32 ic = !en ? IM_COL32(110, 120, 112, 255) : sl[(size_t)i].tint ? sl[(size_t)i].tint : sel ? IM_COL32(255, 247, 226, 255) : IM_COL32(222, 232, 220, 255);
+        ImU32 ic = !en ? IM_COL32(120, 120, 110, 255) : sl[(size_t)i].tint ? sl[(size_t)i].tint : sel ? IM_COL32(255, 250, 225, 255) : IM_COL32(232, 228, 210, 255);
         icon_draw(dl, sl[(size_t)i].icon, ImVec2(mc.x, mc.y - fs * 0.55f), ir, ic, sl[(size_t)i].addon);
-        float lfs = fs * 1.25f;
+        float lfs = fs;
         std::string lab = sl[(size_t)i].label;
         float maxw = R * 0.62f * fminf(1.0f, 4.2f / (float)(n > 4 ? n - 1 : 3));
-        while (lab.size() > 3 && font->CalcTextSizeA(lfs, FLT_MAX, 0, lab.c_str()).x > maxw) lab.resize(lab.size() - 2), lab += ".";
-        ImVec2 ts = font->CalcTextSizeA(lfs, FLT_MAX, 0, lab.c_str());
-        dl->AddText(font, lfs, ImVec2(mc.x - ts.x / 2, mc.y + ir * 0.9f), en ? IM_COL32(250, 246, 232, 255) : IM_COL32(125, 132, 126, 255), lab.c_str());
-        if (n <= 9) {   // the number key of the slice
+        while (lab.size() > 3 && look_width(lfs, lab.c_str()) > maxw) lab.resize(lab.size() - 2), lab += ".";
+        float lw = look_width(lfs, lab.c_str());
+        look_text(dl, lfs, ImVec2(mc.x - lw / 2, mc.y + ir * 0.9f), en ? cream : IM_COL32(135, 135, 125, 255), lab.c_str());
+        if (n <= 9) {   // the number key of the slice, in a small square like the game's button prompts
             char nb[4];
             snprintf(nb, sizeof nb, "%d", i + 1);
             ImVec2 nc(ci.x + dir.x * (R - 20 * scale), ci.y + dir.y * (R - 20 * scale));
-            dl->AddCircleFilled(nc, 12 * scale, IM_COL32(0, 0, 0, 150), 16);
-            ImVec2 ns = ImGui::CalcTextSize(nb);
-            dl->AddText(ImVec2(nc.x - ns.x / 2, nc.y - ns.y / 2), IM_COL32(237, 194, 84, 255), nb);
+            look_square(dl, ImVec2(nc.x - 12 * scale, nc.y - 12 * scale), 24 * scale, IM_COL32(20, 22, 22, 220));
+            float nw = look_width(fs * 0.8f, nb);
+            look_text(dl, fs * 0.8f, ImVec2(nc.x - nw / 2, nc.y - 11 * scale), gold, nb);
         }
     }
     // centre: the ring's title and the aimed slice's detail
-    dl->AddCircleFilled(c, r0 - 8 * scale, IM_COL32(10, 18, 15, 235), 48);
-    dl->AddCircle(c, r0 - 8 * scale, IM_COL32(95, 115, 100, 180), 48, 1.5f * scale);
+    dl->AddCircleFilled(c, r0 - 8 * scale, IM_COL32(9, 11, 11, 215), 48);
+    dl->AddCircle(c, r0 - 8 * scale, IM_COL32(200, 194, 168, 130), 48, 1.5f * scale);
     const char *title = title_of(W.rings.back());
-    float tfs = fs * 1.15f;
+    float tfs = fs * 1.1f;
     float cw = (r0 - 18 * scale) * 2;
     ImVec2 tz = font->CalcTextSizeA(tfs, FLT_MAX, cw, title);
-    dl->AddText(font, tfs, ImVec2(c.x - tz.x / 2, c.y - tz.y - 4 * scale), IM_COL32(237, 194, 84, 255), title, nullptr, cw);
+    look_text(dl, tfs, ImVec2(c.x - tz.x / 2, c.y - tz.y - 4 * scale), gold, title);
     const char *det = W.sel >= 0 ? sl[(size_t)W.sel].detail.c_str() : "Aim at a slice";
-    ImVec2 dz = font->CalcTextSizeA(fs * 0.88f, FLT_MAX, cw, det);
-    dl->AddText(font, fs * 0.88f, ImVec2(c.x - dz.x / 2, c.y + 4 * scale), IM_COL32(205, 215, 205, 255), det, nullptr, cw);
+    float dfs = fs * 0.78f;
+    const char *s = det, *dend = det + strlen(det);
+    float dy = c.y + 6 * scale;
+    for (int line = 0; s < dend && line < 3; line++) {   // wrapped to the centre disc
+        const char *brk = font->CalcWordWrapPositionA(dfs / font->FontSize, s, dend, cw);
+        if (brk <= s) brk = s + 1;
+        float lw = look_width(dfs, s, brk);
+        look_text(dl, dfs, ImVec2(c.x - lw / 2, dy), IM_COL32(214, 210, 192, 255), s, brk);
+        dy += dfs * 1.2f;
+        s = brk;
+        while (s < dend && *s == ' ') s++;
+    }
 
     char hint[200];
     bool padhint = W.pad_opened || W.stick_used;
@@ -515,9 +527,10 @@ void online_wheel_layout(float w, float h, float scale) {
     else
         snprintf(hint, sizeof hint, padhint ? "Aim with the left stick and press A. B to go back." :
                                               "Click or press 1-%d to choose. Esc or right click to go back.", n);
-    ImVec2 hz = ImGui::CalcTextSize(hint);
-    dl->AddRectFilled(ImVec2(c.x - hz.x / 2 - 14 * scale, c.y + R + 22 * scale), ImVec2(c.x + hz.x / 2 + 14 * scale, c.y + R + 22 * scale + hz.y + 12 * scale), IM_COL32(0, 0, 0, 160), 8 * scale);
-    dl->AddText(ImVec2(c.x - hz.x / 2, c.y + R + 28 * scale), IM_COL32(235, 235, 225, 255), hint);
+    float hfs = 18 * scale, hz = look_width(hfs, hint);
+    float hy = c.y + R + 22 * scale;
+    look_bar(dl, ImVec2(c.x - hz / 2 - 40 * scale, hy), ImVec2(c.x + hz / 2 + 40 * scale, hy + hfs + 14 * scale), 150);
+    look_text(dl, hfs, ImVec2(c.x - hz / 2, hy + 6 * scale), LOOK_DIM, hint);
 }
 
 // ---- scripted screenshots (TOTK_NET_DEMO_DIR, ui/online_ui.cpp online_demo): puts the wheel into a given state

@@ -176,45 +176,137 @@ static void toasts_expire(double now) {
     }
 }
 
+// ---- the game's look
+static float g_look_a = 1;   // alpha of everything the look_* calls draw, set around a fade
+static void look_alpha(float a) { g_look_a = a; }
+static ImU32 fade(ImU32 c) {
+    return g_look_a >= 1 ? c : (c & 0x00ffffffu) | ((ImU32)((float)(c >> IM_COL32_A_SHIFT) * g_look_a) << IM_COL32_A_SHIFT);
+}
+
+ImFont *look_font() {
+    ImFont *f = online_game_font();
+    return f ? f : ImGui::GetFont();
+}
+
+float look_width(float size, const char *text, const char *end) {
+    ImFont *f = look_font();
+    return f->CalcTextSizeA(size, FLT_MAX, 0, text, end).x;
+}
+
+// Cream text with a dark one-pixel shadow down and to the right, as the game's HUD text has.
+void look_text(ImDrawList *dl, float size, ImVec2 pos, ImU32 col, const char *text, const char *end) {
+    ImFont *f = look_font();
+    float o = fmaxf(1.0f, size / 22.0f);
+    dl->AddText(f, size, ImVec2(pos.x + o, pos.y + o), fade(IM_COL32(0, 0, 0, 200)), text, end);
+    dl->AddText(f, size, pos, fade(col), text, end);
+}
+
+void look_bar(ImDrawList *dl, ImVec2 a, ImVec2 b, int alpha, float fade_w) {
+    ImU32 solid = fade(IM_COL32(9, 11, 11, alpha)), clear = fade(IM_COL32(9, 11, 11, 0));
+    if (fade_w <= 0 || b.x - a.x <= fade_w) return dl->AddRectFilled(a, b, solid);
+    dl->AddRectFilled(a, ImVec2(b.x - fade_w, b.y), solid);
+    dl->AddRectFilledMultiColor(ImVec2(b.x - fade_w, a.y), b, solid, clear, clear, solid);
+}
+
+void look_square(ImDrawList *dl, ImVec2 a, float side, ImU32 col) {
+    dl->AddRectFilled(a, ImVec2(a.x + side, a.y + side), fade(col));
+    dl->AddRect(a, ImVec2(a.x + side, a.y + side), fade(IM_COL32(255, 255, 255, 70)));
+}
+
+LookStyle::LookStyle() {
+    ImGui::PushFont(look_font());
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(LOOK_TEXT));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.035f, 0.043f, 0.043f, 0.86f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.93f, 0.88f, 0.70f, 0.55f));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(1, 1, 1, 0.07f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.94f, 0.89f, 0.66f, 0.30f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.94f, 0.89f, 0.66f, 0.45f));
+    ImGui::PushStyleColor(ImGuiCol_NavCursor, ImVec4(1.0f, 0.93f, 0.62f, 0.9f));
+}
+LookStyle::~LookStyle() {
+    ImGui::PopStyleColor(7);
+    ImGui::PopStyleVar(2);
+    ImGui::PopFont();
+}
+
+// ---- toasts: notice rows on the left, as the game shows its own pickup notices; a coloured square marks the kind
+// (blue-grey info, green good, amber warning). A request (teleport, team invite) has a second row with the two answers.
 void online_toasts_layout(float w, float h, float scale) {
-    (void)h;
+    (void)w;
     double now = now_s();
-    float y = 150 * scale, tw = 380 * scale;
-    const ImVec4 tint[3] = {ImVec4(0.30f, 0.45f, 0.62f, 1), ImVec4(0.25f, 0.62f, 0.40f, 1), ImVec4(0.85f, 0.65f, 0.25f, 1)};
+    float x = 10 * scale, y = h * 0.34f, fs = 24 * scale, row_h = 42 * scale;
+    const ImU32 tint[3] = {IM_COL32(140, 168, 208, 255), IM_COL32(125, 208, 140, 255), IM_COL32(244, 190, 92, 255)};
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    ImFont *font = look_font();
     for (size_t i = 0; i < g_toasts.size(); i++) {
         const Toast &t = g_toasts[i];
         double age = now - t.born, left = t.ttl - age;
         float a = (float)std::min({1.0, age / 0.2, left / 0.4});
         if (a <= 0) continue;
-        char id[24];
-        snprintf(id, sizeof id, "##toast%zu", i);
-        ImGui::SetNextWindowPos(ImVec2(w - 24 * scale - tw, y));
-        ImGui::SetNextWindowSize(ImVec2(tw, 0));
-        ImGui::SetNextWindowBgAlpha(0.88f * a);
-        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, a);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16 * scale, 12 * scale));
-        ImGui::PushStyleColor(ImGuiCol_Border, tint[t.kind % 3]);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 2.0f);
+        look_alpha(a);
         bool ask = t.what != 0;
-        ImGui::Begin(id, nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                         ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | (ask ? 0 : ImGuiWindowFlags_NoInputs));
-        ImGui::TextWrapped("%s", t.text);
-        if (ask) {
-            ImGui::ProgressBar((float)(left / t.ttl), ImVec2(-1, 6 * scale), "");
-            float bw = (tw - 32 * scale - ImGui::GetStyle().ItemSpacing.x) / 2;
-            char yes[48], no[48];
-            snprintf(yes, sizeof yes, "Accept (%s)##y%zu", online_key_name(k_yes.load()), i);
-            snprintf(no, sizeof no, "Refuse (%s)##n%zu", online_key_name(k_no.load()), i);
-            if (ImGui::Button(yes, ImVec2(bw, 0))) g_req_yes = 1;
-            ImGui::SameLine();
-            if (ImGui::Button(no, ImVec2(bw, 0))) g_req_no = 1;
+        // wrap to at most two rows of 640 px
+        float maxw = 640 * scale;
+        const char *s = t.text, *end = t.text + strlen(t.text);
+        std::vector<std::pair<const char *, const char *>> rows;
+        while (s < end && rows.size() < 3) {
+            const char *brk = font->CalcWordWrapPositionA(fs / font->FontSize, s, end, maxw);
+            if (brk <= s) brk = s + 1;
+            rows.push_back({s, brk});
+            s = brk;
+            while (s < end && *s == ' ') s++;
         }
-        y += ImGui::GetWindowHeight() + 10 * scale;
-        ImGui::End();
-        ImGui::PopStyleVar(3);
-        ImGui::PopStyleColor();
+        float tw = 0;
+        for (auto &r : rows) tw = fmaxf(tw, look_width(fs, r.first, r.second));
+        float bh = (float)rows.size() * row_h + (ask ? row_h + 8 * scale : 0), bw = tw + 40 * scale + 72 * scale;
+        if (ask) bw = fmaxf(bw, 470 * scale);
+        look_bar(dl, ImVec2(x, y), ImVec2(x + bw, y + bh - 3 * scale), 125, 64 * scale);
+        look_square(dl, ImVec2(x + 8 * scale, y + 8 * scale), 26 * scale, tint[t.kind % 3]);
+        float ty = y + 5 * scale;
+        for (auto &r : rows) {
+            look_text(dl, fs, ImVec2(x + 40 * scale, ty), LOOK_TEXT, r.first, r.second);
+            ty += row_h;
+        }
+        if (ask) {
+            float by = y + (float)rows.size() * row_h + 2 * scale;
+            dl->AddRectFilled(ImVec2(x + 40 * scale, by + row_h - 6 * scale), ImVec2(x + 40 * scale + (bw - 80 * scale) * (float)(left / t.ttl), by + row_h - 3 * scale),
+                              fade(LOOK_GOLD));
+            char yes[48], no[48];
+            snprintf(yes, sizeof yes, "%s  Accept", online_key_name(k_yes.load()));
+            snprintf(no, sizeof no, "%s  Refuse", online_key_name(k_no.load()));
+            float bx = x + 40 * scale;
+            char id[24];
+            snprintf(id, sizeof id, "##toast%zu", i);
+            ImGui::SetNextWindowPos(ImVec2(bx, by));
+            ImGui::SetNextWindowSize(ImVec2(bw - 40 * scale, row_h - 8 * scale));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+            ImGui::Begin(id, nullptr,
+                         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
+                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+            const char *lab[2] = {yes, no};
+            float bx2 = bx;
+            for (int k = 0; k < 2; k++) {
+                float lw = look_width(fs * 0.85f, lab[k]) + 26 * scale;
+                ImGui::SetCursorScreenPos(ImVec2(bx2, by));
+                ImGui::PushID(k);
+                bool hit = ImGui::InvisibleButton("##ans", ImVec2(lw, row_h - 10 * scale));
+                ImGui::PopID();
+                bool hov = ImGui::IsItemHovered();
+                ImVec2 p0 = ImGui::GetItemRectMin();
+                dl->AddRectFilled(p0, ImVec2(p0.x + lw, p0.y + row_h - 10 * scale), fade(hov ? IM_COL32(240, 228, 170, 90) : IM_COL32(255, 255, 255, 28)));
+                look_text(dl, fs * 0.85f, ImVec2(p0.x + 13 * scale, p0.y + 3 * scale), k ? LOOK_DIM : LOOK_GOLD, lab[k]);
+                if (hit) (k ? g_req_no : g_req_yes) = 1;
+                bx2 += lw + 12 * scale;
+            }
+            ImGui::End();
+            ImGui::PopStyleVar(2);
+        }
+        y += bh + 4 * scale;
     }
+    look_alpha(1);
 }
 
 // ---- confirmation
@@ -234,23 +326,30 @@ static void confirm_close() {
 
 void online_confirm_layout(float w, float h, float scale) {
     if (!g_conf.on) return;
+    float pw = 560 * scale;
+    ImGui::GetForegroundDrawList()->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), IM_COL32(0, 0, 0, 110));
+    LookStyle look;
     ImGui::SetNextWindowPos(ImVec2(w / 2, h / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(520 * scale, 0));
+    ImGui::SetNextWindowSize(ImVec2(pw, 0));
     ImGui::SetNextWindowFocus();
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22 * scale, 18 * scale));
     ImGui::Begin("##online_confirm", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
     ImGui::TextWrapped("%s", g_conf.q);
     ImGui::Spacing();
-    float bw = (520 * scale - 56 * scale - ImGui::GetStyle().ItemSpacing.x) / 2;
+    float bw = (pw - 44 * scale - ImGui::GetStyle().ItemSpacing.x) / 2;
     bool yes = false, no = false;
     if (ImGui::Button(g_conf.yes, ImVec2(bw, 0))) yes = true;
     ImGui::SameLine();
     if (g_conf.first) ImGui::SetKeyboardFocusHere();   // Cancel starts focused: an accidental A or Enter does nothing
     if (ImGui::Button("Cancel", ImVec2(bw, 0))) no = true;
     g_conf.first = false;
-    ImGui::TextDisabled("Left and right to switch, Enter or A to choose, Esc or B to cancel");
+    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(LOOK_DIM));
+    ImGui::TextUnformatted("Enter or A to choose, Esc or B to cancel");
+    ImGui::PopStyleColor();
     if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) no = true;
     ImGui::End();
+    ImGui::PopStyleVar();
     if (yes) {
         void (*fn)(void *) = g_conf.fn;
         void *u = g_conf.user;
@@ -270,6 +369,7 @@ static struct {
     double last_activity;
     uint32_t serial_seen;
     bool server_msg;
+    int scroll;
 } g_chat;
 
 void online_chat_open(NetChannel channel, const char *prefill, const char *prompt) {
@@ -362,29 +462,35 @@ static int chat_cb(ImGuiInputTextCallbackData *d) {   // Tab: the next channel
     return 0;
 }
 
-static ImVec4 chat_color(NetChannel c) {
+static ImU32 chat_color(NetChannel c) {
     switch (c) {
-    case NET_CHAT_TEAM: return ImVec4(0.45f, 0.88f, 0.55f, 1);
-    case NET_CHAT_WHISPER: return ImVec4(0.86f, 0.62f, 0.96f, 1);
-    case NET_CHAT_SYSTEM: return ImVec4(0.96f, 0.80f, 0.35f, 1);
-    default: return ImVec4(0.96f, 0.94f, 0.88f, 1);
+    case NET_CHAT_TEAM: return IM_COL32(176, 232, 150, 255);
+    case NET_CHAT_WHISPER: return IM_COL32(232, 178, 240, 255);
+    case NET_CHAT_SYSTEM: return LOOK_GOLD;
+    default: return LOOK_TEXT;
     }
 }
 
-static void chat_line_text(const NetChatLine &l, char *out, size_t n) {
+static void chat_line_text(const NetChatLine &l, char *out, size_t n, size_t *prefix) {
     NetPlayer self;
     bool mine = net_player_by_id(net_self_id(), &self) && l.from == self.id;
+    int pre = 0;
     switch (l.channel) {
-    case NET_CHAT_SYSTEM: snprintf(out, n, "* %s", l.text); break;
-    case NET_CHAT_TEAM: snprintf(out, n, "[Team] %s: %s", l.from_name, l.text); break;
+    case NET_CHAT_SYSTEM: snprintf(out, n, "%s", l.text); break;
+    case NET_CHAT_TEAM: snprintf(out, n, "[Team] %s: %n%s", l.from_name, &pre, l.text); break;
     case NET_CHAT_WHISPER:
-        if (mine) snprintf(out, n, "[To %s] %s", l.to_name, l.text);
-        else snprintf(out, n, "[From %s] %s", l.from_name, l.text);
+        if (mine) snprintf(out, n, "[To %s] %n%s", l.to_name, &pre, l.text);
+        else snprintf(out, n, "[From %s] %n%s", l.from_name, &pre, l.text);
         break;
-    default: snprintf(out, n, "%s: %s", l.from_name, l.text);
+    default: snprintf(out, n, "%s: %n%s", l.from_name, &pre, l.text);
     }
+    *prefix = (size_t)pre;
 }
 
+// One wrapped row of the chat log: its text, the length of the sender's tag at its start, the channel.
+struct ChatRow { std::string text; size_t prefix; NetChannel channel; };
+
+// The chat box: the game's notice rows at the bottom left, newest last; a bar and a text field under them while typing.
 void online_chat_layout(float w, float h, float scale) {
     double now = now_s();
     uint32_t serial = net_chat_serial();
@@ -407,47 +513,84 @@ void online_chat_layout(float w, float h, float scale) {
     int lines = 10;
     const char *cl = cfg_get("TOTK_NET_CHAT_LINES");
     if (cl && atoi(cl) >= 4 && atoi(cl) <= 30) lines = atoi(cl);
-    float cw = fminf(w * 0.40f, 760 * scale), lh = ImGui::GetTextLineHeightWithSpacing();
-    const ImGuiStyle &st = ImGui::GetStyle();
-    float log_h = lines * lh, input_h = g_chat.typing ? ImGui::GetFrameHeight() + st.ItemSpacing.y + 24 * scale : 0;
-    float total = log_h + input_h + st.WindowPadding.y * 2;
-    ImGui::SetNextWindowPos(ImVec2(22 * scale, h - 120 * scale - total));
-    ImGui::SetNextWindowSize(ImVec2(cw, total));
-    ImGui::SetNextWindowBgAlpha(g_chat.typing ? 0.72f : 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale, 10 * scale));
-    ImGuiWindowFlags f = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                         ImGuiWindowFlags_NoScrollWithMouse;
-    if (!g_chat.typing) f |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing;
-    else ImGui::SetNextWindowFocus();
-    ImGui::Begin("##online_chat", nullptr, f);
-    ImGui::BeginChild("##chatlog", ImVec2(0, log_h), ImGuiChildFlags_None,
-                      g_chat.typing ? ImGuiWindowFlags_None : (ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoInputs));
+    look_alpha(alpha);
+    float fs = 24 * scale, row_h = 42 * scale, x0 = 10 * scale, tx = 40 * scale;
+    float cw = fminf(w * 0.44f, 820 * scale);
+
+    // wrap every kept line into rows of at most cw
+    ImFont *font = look_font();
+    std::vector<ChatRow> rows;
     int count = net_chat_count();
-    for (int i = 0; i < count; i++) {
+    for (int i = std::max(0, count - 60); i < count; i++) {
         NetChatLine l;
         if (!net_chat_get(i, &l)) continue;
         char text[NET_TEXT_MAX + 96];
-        chat_line_text(l, text, sizeof text);
-        ImGui::PushStyleColor(ImGuiCol_Text, chat_color(l.channel));
-        ImGui::TextWrapped("%s", text);
-        ImGui::PopStyleColor();
+        size_t prefix;
+        chat_line_text(l, text, sizeof text, &prefix);
+        const char *s = text, *end = text + strlen(text);
+        bool first = true;
+        while (s < end) {
+            const char *brk = font->CalcWordWrapPositionA(fs / font->FontSize, s, end, cw - tx - 24 * scale);
+            if (brk <= s) brk = s + 1;
+            ChatRow r;
+            r.text.assign(s, brk);
+            r.prefix = first ? std::min(prefix, r.text.size()) : 0;
+            r.channel = l.channel;
+            rows.push_back(r);
+            s = brk;
+            while (s < end && *s == ' ') s++;
+            first = false;
+        }
     }
-    if (!g_chat.typing || g_chat.follow) ImGui::SetScrollHereY(1.0f);
-    else if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 2) g_chat.follow = true;
+    int total = (int)rows.size();
     if (g_chat.typing && ImGui::GetIO().MouseWheel != 0) g_chat.follow = false;
-    ImGui::EndChild();
+    if (g_chat.follow) g_chat.scroll = 0;
+    if (g_chat.typing) g_chat.scroll = std::max(0, std::min(g_chat.scroll + (int)ImGui::GetIO().MouseWheel, std::max(0, total - lines)));
+    int last = total - g_chat.scroll, first_row = std::max(0, last - lines);
+    float input_h = g_chat.typing ? 74 * scale : 0;
+    float bottom = h - 86 * scale - input_h;
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    float y = bottom - (float)(last - first_row) * row_h;
+    for (int i = first_row; i < last; i++, y += row_h) {
+        const ChatRow &r = rows[(size_t)i];
+        float tw = look_width(fs, r.text.c_str());
+        look_bar(dl, ImVec2(x0, y), ImVec2(x0 + tx + tw + 64 * scale, y + row_h - 3 * scale), 120, 64 * scale);
+        ImU32 tag = chat_color(r.channel);
+        const char *s = r.text.c_str();
+        float px = x0 + tx;
+        if (r.prefix) {
+            look_text(dl, fs, ImVec2(px, y + 5 * scale), tag, s, s + r.prefix);
+            px += look_width(fs, s, s + r.prefix);
+        }
+        look_text(dl, fs, ImVec2(px, y + 5 * scale), r.channel == NET_CHAT_ALL ? LOOK_TEXT : tag, s + r.prefix);
+    }
     if (g_chat.typing) {
+        float iy = bottom + 6 * scale;
         const char *chname = g_chat.server_msg ? "Server message" : g_chat.channel == NET_CHAT_TEAM ? "Team" :
                              g_chat.channel == NET_CHAT_WHISPER ? g_chat.whisper_to : "All";
         char label[64];
         snprintf(label, sizeof label, "%s", chname);
-        ImVec4 c = chat_color(g_chat.server_msg ? NET_CHAT_SYSTEM : g_chat.channel);
-        ImGui::PushStyleColor(ImGuiCol_Text, c);
-        ImGui::AlignTextToFramePadding();
-        ImGui::Text("[%s]", label);
-        ImGui::PopStyleColor();
-        ImGui::SameLine();
+        ImU32 c = chat_color(g_chat.server_msg ? NET_CHAT_SYSTEM : g_chat.channel);
+        float lw = look_width(fs, label) + 40 * scale;
+        look_bar(dl, ImVec2(x0, iy), ImVec2(x0 + cw, iy + row_h), 175);
+        look_square(dl, ImVec2(x0 + 8 * scale, iy + 8 * scale), 26 * scale, c);
+        look_text(dl, fs, ImVec2(x0 + tx + 4 * scale, iy + 5 * scale), c, label);
+        const char *hint = "Enter sends, Tab changes channel, Esc closes. /w name message whispers.";
+        look_bar(dl, ImVec2(x0, iy + row_h + 3 * scale), ImVec2(x0 + 18 * scale + look_width(16 * scale, hint) + 40 * scale, iy + row_h + 3 * scale + 28 * scale), 100, 40 * scale);
+        look_text(dl, 16 * scale, ImVec2(x0 + 14 * scale, iy + row_h + 7 * scale), LOOK_DIM, hint);
+        // the text field: a transparent ImGui field over the bar, in the game's font and colours
+        ImGui::SetNextWindowPos(ImVec2(x0 + tx + lw, iy));
+        ImGui::SetNextWindowSize(ImVec2(cw - tx - lw, row_h));
+        ImGui::SetNextWindowFocus();
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4 * scale, 7 * scale));
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(LOOK_TEXT));
+        ImGui::PushFont(font);
+        ImGui::Begin("##online_chat", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse);
         ImGui::SetNextItemWidth(-1);
         if (!g_chat.prefilled) {
             ImGui::SetKeyboardFocusHere();
@@ -456,83 +599,72 @@ void online_chat_layout(float w, float h, float scale) {
         if (ImGui::InputText("##msg", g_chat.buf, sizeof g_chat.buf,
                              ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackCompletion, chat_cb))
             chat_submit();
-        ImGui::TextDisabled("Enter sends, Tab changes channel, Esc closes. /w name message whispers.");
         if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) chat_close();
+        ImGui::End();
+        ImGui::PopFont();
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar(3);
     }
-    ImGui::End();
-    ImGui::PopStyleVar(2);
+    look_alpha(1);
 }
 
-// ---- player list
+// ---- player list: the game's HUD rows at the top right, one per player (a coloured square for the team, the name, the
+// role and ping on the right, the character and place small underneath), under a small "Players online" line.
 static bool g_list_on;
 void online_list_toggle(void) { g_list_on = !g_list_on; }
 
 bool online_player_color(const NetPlayer &p, ImU32 *col) {
-    *col = p.role == NET_ROLE_HOST ? IM_COL32(240, 195, 80, 255) : p.role == NET_ROLE_MOD ? IM_COL32(120, 190, 255, 255)
-                                                                                         : IM_COL32(245, 240, 225, 255);
+    *col = p.role == NET_ROLE_HOST ? LOOK_GOLD : p.role == NET_ROLE_MOD ? IM_COL32(150, 205, 255, 255) : LOOK_TEXT;
     return p.role != NET_ROLE_PLAYER;
 }
 
+static ImU32 team_color(uint32_t team) {
+    static const ImU32 pal[] = {IM_COL32(140, 165, 205, 255), IM_COL32(125, 205, 140, 255), IM_COL32(240, 185, 90, 255),
+                                IM_COL32(215, 140, 200, 255), IM_COL32(120, 210, 210, 255), IM_COL32(230, 120, 110, 255)};
+    return team ? pal[(team - 1) % (sizeof pal / sizeof *pal)] : IM_COL32(170, 178, 190, 255);
+}
+
 void online_list_layout(float w, float h, float scale) {
+    (void)h;
     if (!g_list_on || net_state() != NET_ONLINE) return;
     NetPlayer pl[NET_MAX_PLAYERS];
     NetTeam teams[NET_MAX_TEAMS];
     int n = net_players(pl, NET_MAX_PLAYERS), nt = net_teams(teams, NET_MAX_TEAMS);
-    float ww = fminf(w * 0.55f, 900 * scale);
-    ImGui::SetNextWindowPos(ImVec2(w / 2, h * 0.42f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(ww, 0));
-    ImGui::SetNextWindowBgAlpha(0.86f);
-    ImGui::Begin("##online_list", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
-    ImGui::Text("Players online: %d", n);
-    ImGui::SameLine(ww - ImGui::CalcTextSize("Press the list key again to close").x - 40 * scale);
-    ImGui::TextDisabled("Press the list key again to close");
-    if (ImGui::BeginTable("##players", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-        ImGui::TableSetupColumn("Name", 0, 2.4f);
-        ImGui::TableSetupColumn("Character", 0, 1.4f);
-        ImGui::TableSetupColumn("Area", 0, 2.2f);
-        ImGui::TableSetupColumn("Team", 0, 1.6f);
-        ImGui::TableSetupColumn("Ping", 0, 0.8f);
-        ImGui::TableSetupColumn("##flags", 0, 1.2f);
-        ImGui::TableHeadersRow();
-        for (int i = 0; i < n; i++) {
-            const NetPlayer &p = pl[i];
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImU32 col;
-            online_player_color(p, &col);
-            ImGui::PushStyleColor(ImGuiCol_Text, col);
-            ImGui::Text("%s%s", p.name, p.id == net_self_id() ? " (you)" : "");
-            ImGui::PopStyleColor();
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(p.character);
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(p.area);
-            ImGui::TableNextColumn();
-            const char *tn = "-";
-            for (int k = 0; k < nt; k++)
-                if (teams[k].id == p.team) tn = teams[k].name;
-            ImGui::TextUnformatted(tn);
-            ImGui::TableNextColumn();
-            if (p.id == net_self_id()) {
-                ImGui::TextDisabled("-");
-            } else {
-                ImVec4 pc = p.ping_ms < 60 ? ImVec4(0.45f, 0.9f, 0.5f, 1) : p.ping_ms < 120 ? ImVec4(0.95f, 0.85f, 0.35f, 1)
-                                                                                           : ImVec4(0.95f, 0.45f, 0.35f, 1);
-                ImGui::TextColored(pc, "%u ms", p.ping_ms);
-            }
-            ImGui::TableNextColumn();
-            if (p.role == NET_ROLE_HOST) ImGui::TextColored(ImVec4(0.94f, 0.76f, 0.31f, 1), "HOST");
-            else if (p.role == NET_ROLE_MOD) ImGui::TextColored(ImVec4(0.47f, 0.75f, 1.0f, 1), "MOD");
-            if (p.muted) {
-                ImGui::SameLine();
-                ImGui::TextDisabled("muted");
-            }
-        }
-        ImGui::EndTable();
+    ImDrawList *dl = ImGui::GetForegroundDrawList();
+    float row_h = 58 * scale, big = 25 * scale, small = 17 * scale, rw = 430 * scale, x = w - 14 * scale - rw, y = 78 * scale;
+    char head[48];
+    snprintf(head, sizeof head, "Players online  %d", n);
+    look_bar(dl, ImVec2(x, y), ImVec2(x + rw, y + 34 * scale), 130);
+    look_text(dl, small * 1.1f, ImVec2(x + 12 * scale, y + 6 * scale), LOOK_GOLD, head);
+    char hint[40];
+    snprintf(hint, sizeof hint, "%s: close", online_key_name(k_list.load()));
+    look_text(dl, small * 0.9f, ImVec2(x + rw - 10 * scale - look_width(small * 0.9f, hint), y + 9 * scale), LOOK_DIM, hint);
+    y += 38 * scale;
+    for (int i = 0; i < n; i++) {
+        const NetPlayer &p = pl[i];
+        bool self = p.id == net_self_id();
+        look_bar(dl, ImVec2(x, y), ImVec2(x + rw, y + row_h - 4 * scale), self ? 150 : 105);
+        look_square(dl, ImVec2(x + 10 * scale, y + 9 * scale), 30 * scale, team_color(p.team));
+        ImU32 col;
+        online_player_color(p, &col);
+        char nm[NET_NAME_MAX + 8];
+        snprintf(nm, sizeof nm, "%s", p.name);
+        look_text(dl, big, ImVec2(x + 52 * scale, y + 3 * scale), col, nm);
+        const char *tn = nullptr;
+        for (int k = 0; k < nt; k++)
+            if (teams[k].id == p.team) tn = teams[k].name;
+        char sub[160];
+        snprintf(sub, sizeof sub, "%s  %s%s%s%s", p.character, p.area, tn ? "  Team " : "", tn ? tn : "", p.muted ? "  muted" : "");
+        look_text(dl, small, ImVec2(x + 52 * scale, y + 31 * scale), LOOK_DIM, sub);
+        char right[40] = "";
+        if (self) snprintf(right, sizeof right, "You");
+        else if (p.role == NET_ROLE_HOST) snprintf(right, sizeof right, "Host  %u ms", p.ping_ms);
+        else if (p.role == NET_ROLE_MOD) snprintf(right, sizeof right, "Mod  %u ms", p.ping_ms);
+        else snprintf(right, sizeof right, "%u ms", p.ping_ms);
+        ImU32 pc = self ? LOOK_DIM : p.ping_ms < 60 ? IM_COL32(170, 230, 160, 255) : p.ping_ms < 120 ? LOOK_GOLD : IM_COL32(240, 140, 110, 255);
+        look_text(dl, small * 1.05f, ImVec2(x + rw - 12 * scale - look_width(small * 1.05f, right), y + 8 * scale), pc, right);
+        y += row_h;
     }
-    ImGui::End();
 }
 
 // ---- net events and the per-frame pump
@@ -676,7 +808,7 @@ const char *online_demo_shot(uint64_t frame) {
         return path;
     }
     static const struct { int at; const char *name; int what; } script[] = {
-        {0, "01-chat-open", 1}, {50, "02-chat-idle", 2}, {100, "03-player-list", 3}, {150, nullptr, 4},
+        {0, "01-chat-open", 1}, {50, "02-chat-idle", 2}, {100, "03-player-list", 3}, {150, "04-toasts", 4},
         {200, "05-wheel-top", 5}, {250, "06-wheel-teleport-pick", 6}, {300, "07-wheel-team", 7},
         {350, "08-wheel-host", 8}, {400, "09-confirm-kick", 9}, {470, "10-teleported", 10}, {520, nullptr, 11}, {800, "11-toasts", 12},
     };
@@ -692,7 +824,10 @@ const char *online_demo_shot(uint64_t frame) {
         break;
     case 3: online_list_toggle(); break;
     case 4:
-        online_list_toggle();   // closes the list; the fake server's requests are on screen by now
+        online_list_toggle();   // closes the list
+        online_toast("Dax joined the server", 1);   // one of each kind, for the screenshot
+        online_toast("Bao is far away: the teleport may take a while", 2);
+        online_toast_ask("Alice asks to teleport to you", 1, 0);
         break;
     case 5: online_wheel_demo(1); break;
     case 6: online_wheel_demo(2); break;

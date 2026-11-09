@@ -45,6 +45,16 @@ answers (click a button, press the new key; Delete clears, Esc cancels), the whe
 buttons together, let go), the wheel's size and the chat's fade time and line count. Everything is written to
 `totk.ini`, section `[online]`.
 
+## Look
+
+Everything drawn over the game (chat, player list, toasts, the wheel, the confirmation) looks like the game's own HUD, not
+like the F1 menu: the Switch standard shared font, cream text with a one-pixel dark shadow, sharp-cornered translucent
+dark bars that fade out on the right, and a small coloured square marking a person (team colour) or a kind of notice.
+The F1 menu's Online tab keeps the menu's style. The font is read at run time from `shared-fonts/0-standard.bfttf`
+(`ov_shared_font_dir`: `TOTK_SHARED_FONTS`, `shared-fonts` next to `totk.exe`, or the extracted firmware folder that
+`tools/extract_fonts.py` fills) and decoded in memory (`ui/menu.cpp`, `fonts_up`); nothing of it is stored or shipped.
+Without that file the menu font is used. The drawing helpers are `look_*` in `ui/online_ui.cpp`.
+
 ## The wheel menu
 
 Hold the wheel key to open it, aim, let go to choose.

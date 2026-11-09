@@ -58,6 +58,8 @@ double frame_step_limit_hz(void);
 extern const int rt_game_version;
 extern const char rt_port_version[];
 void cheats_frame(uint64_t frame);   // cheats.c
+const char *ov_shared_font_dir(char *buf, size_t n);    // ov_system.c: where the Switch shared fonts are read from
+uint64_t ov_bfttf_size(const uint8_t *p, uint64_t len); // ov_system.c: decoded font size of a BFTTF image, 0 if none
 bool tab_cheats(float scale);        // ui/cheats_tab.cpp; true: restart into the rebuild
 int playtime_get(uint64_t *total_s, uint64_t *session_s);   // playtime.c
 }
@@ -336,6 +338,9 @@ static void add_row_glyphs(void *ctx, const char *text) {
     static_cast<ImFontGlyphRangesBuilder *>(ctx)->AddText(text);
 }
 
+static ImFont *g_game_font;   // the online UI's face (see fonts_up); null when the player's files hold none
+ImFont *online_game_font() { return g_game_font; }
+
 static int fonts_up(float scale) {
     enum { N = sizeof kCjk / sizeof *kCjk };
     ImFontAtlas *fa = ImGui::GetIO().Fonts;
@@ -373,12 +378,36 @@ static int fonts_up(float scale) {
         mc.FontDataOwnedByAtlas = false;
         fa->AddFontFromMemoryTTF(data[i], (int)size, 26.0f * scale, &mc, ranges[i].Data);
     }
+    // The game's own face for what the online UI draws over the game: the Switch standard shared font, read from the
+    // player's firmware files (tools/extract_fonts.py) and decoded here; nothing of it is shipped. Added after the
+    // merge loop so it stays a font of its own. Without the file the online UI uses the menu font.
+    uint8_t *game_ttf = nullptr;
+    g_game_font = nullptr;
+    {
+        char dir[512], path[640];
+        uint64_t size = 0;
+        snprintf(path, sizeof path, "%s/0-standard.bfttf", ov_shared_font_dir(dir, sizeof dir));
+        uint8_t *raw = plat_file_read(path, &size);
+        uint64_t n = raw ? ov_bfttf_size(raw, size) : 0;
+        if (n) {
+            uint32_t key = be32(raw) ^ 0x7f9a0218u;   // BFTTF: big-endian words XORed with a key; the font starts at byte 8
+            game_ttf = raw;
+            for (uint64_t i = 0; i < n; i++) raw[8 + i] ^= (uint8_t)(key >> (24 - 8 * (i & 3)));
+            if (font_usable(game_ttf + 8, n)) {
+                ImFontConfig gc;
+                gc.FontDataOwnedByAtlas = false;
+                g_game_font = fa->AddFontFromMemoryTTF(game_ttf + 8, (int)n, 26.0f * scale, &gc, kRanges);
+            }
+        }
+        if (!g_game_font) rt_log("menu: no game font at %s: the online UI uses the menu font", path);
+    }
     vk_queue_lock();   // the upload submits on the queue and waits for it
     int ok = ImGui_ImplVulkan_CreateFontsTexture();
     vk_queue_unlock();
     fa->ClearInputData();   // the glyphs are in the texture: the font files and the pixels are not needed again
     fa->ClearTexData();
     for (uint8_t *d : data) free(d);
+    free(game_ttf);
     rt_log("menu: font atlas at %.1f px, language names from %d of %d system fonts", 26.0f * scale, merged, (int)N);
     g_font_scale = ok ? scale : 0;
     return ok;
