@@ -102,10 +102,11 @@ static LONG rel_menu_closed(LONG o) { return o & CUR_ESC ? 0 : o; }
 static volatile LONG cur_suspend;          // F11 or a modal size or move loop under way
 static SRWLOCK cur_lock = SRWLOCK_INIT;    // serialises cursor_update (window thread, input_block callers)
 // Hide the cursor and confine it to the client area while the window is focused, not suspended, not behind a text entry
-// or the menu, and the mouse camera is on; release it otherwise. Safe from any thread.
+// or the menu, and the mouse camera is on; release it otherwise. A test window (TOTK_TEST_WINDOW) never takes the
+// cursor: the user keeps the mouse while test games run. Safe from any thread.
 static void cursor_update(HWND h) {
     AcquireSRWLockExclusive(&cur_lock);
-    int want = h && cur_active && !(cur_rel & CUR_REL) && !cur_suspend && input_cursor_allowed() &&
+    int want = h && gfx_window_test_slot() < 0 && cur_active && !(cur_rel & CUR_REL) && !cur_suspend && input_cursor_allowed() &&
                GetForegroundWindow() == h && !IsIconic(h);
     RECT r;
     POINT tl = {0, 0};
