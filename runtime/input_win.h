@@ -3,6 +3,7 @@
 #include <windows.h>
 
 HWND gfx_window_handle(void);   // gfx_window_win.c; NULL before gfx_window_start
+int gfx_window_test_slot(void);  // gfx_window_win.c: the TOTK_TEST_WINDOW slot, -1 outside test runs
 int input_window_msg(HWND h, UINT m, WPARAM w, LPARAM l, LRESULT *res);
 // The menu's Win32 adapter (ui/menu_win.cpp), called next: F1 / Esc open or close the menu; while it is open, keys,
 // mouse and focus go to it. Returns 1 with *res set when the message is fully handled.
