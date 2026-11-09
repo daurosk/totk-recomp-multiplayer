@@ -25,6 +25,15 @@ State of branch `net-client` (main 10807fa merged in). Remove this file when the
     toast is skipped when it repeats the kick (`online_ui.cpp` `on_events`).
   - Losing the server showed a bare "Connecting..."; the reconnecting state now carries "Lost the connection to the
     server. Reconnecting..." (`net_client.c` `session`), and the client check tests that text (122 checks, 0 failures).
+- Test window mode (`docs/building.md`, the test-run paragraph under "Checks"): `TOTK_TEST_WINDOW=0|1|2` opens the
+  window in that third of the second monitor's working area at 16:9, frame included, at that monitor's DPI; it is shown
+  with `SW_SHOWNOACTIVATE`, never raised (`gfx_window_win.c` skips `raise_window`, `swkbd_win.c` skips its
+  `SetForegroundWindow`), and `input_win.c` `cursor_update` never confines or hides the cursor. `TOTK_TEST_INPUT=<file>`
+  feeds the online UI (chat text and Enter, Esc, the wheel key and wheel screens, confirm, list, yes and no) from lines
+  a test script appends, so no test needs the window in front. `tools/run_game.py` sets the slot by run slot.
+  Checked with one 40 s launch of `build121	otk.exe` in slot 1: the window was (-1080,715)-(-24,1339), wholly on
+  the second monitor (-1080,91)-(0,2011), at 96 DPI; the foreground window was never the game in 40 samples and the
+  cursor clip stayed the whole desktop. `TOTK_TEST_INPUT` was not driven in a game yet (no server round in that run).
 
 ## Not done
 
@@ -39,7 +48,5 @@ State of branch `net-client` (main 10807fa merged in). Remove this file when the
   attach them through GitHub's web editor.
 - Seen, not changed (the UI's look stays as it is): in the player list a long area name such as "Surface (-114, 186)"
   runs into the Team column.
-- `place-window.ps1 -Slot 2` works in system-DPI pixels; DISPLAY1 runs at 96 DPI, so the 960x540 window ended about
-  100 px past DISPLAY1's right edge, on the main monitor. It was moved back with per-monitor-aware `SetWindowPos`.
-- Driving the chat box: a window that lost the focus drops the text field's active state, so Enter has to be a real
-  key press with the game in front; Esc, Y, N and P work as posted window messages.
+- `place-window.ps1` (outside the repository) is replaced by `TOTK_TEST_WINDOW`, and the chat box no longer needs the
+  game in front: drive it with `TOTK_TEST_INPUT` lines instead of key presses.

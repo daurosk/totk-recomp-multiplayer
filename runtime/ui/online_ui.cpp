@@ -615,6 +615,81 @@ static void connect_now() {
 
 void online_connect_now(void) { connect_now(); }
 
+// ---- TOTK_TEST_INPUT=<file>: test input without the window's focus. A test script appends lines to the file; the game
+// reads the lines added since the last look, a few times a second, and acts on each as the player's keys would, so a
+// test game (TOTK_TEST_WINDOW) never has to be brought to the front. A line not yet ended by a newline waits.
+//   type <text>     open the chat box on the all channel (if closed) and put <text> in it
+//   enter           send what the chat box holds, through the same path as Enter (commands such as /w, /me, /who)
+//   chat <text>     type, then enter
+//   esc             close the chat box, the wheel and the confirmation dialog
+//   wheel-down      the wheel key pressed (held), wheel-up released: the same calls as the key itself
+//   wheel <n>       the wheel opened on a scripted screen (online_wheel_demo: 0 closes it)
+//   confirm         choose the confirmation dialog's yes button
+//   list            show or hide the player list
+//   yes, no         answer the newest question toast
+static void test_input_line(char *l) {
+    trim(l);
+    char cmd[16] = "";
+    int used = 0;
+    sscanf(l, "%15s%n", cmd, &used);
+    const char *arg = l + used;
+    while (*arg == ' ') arg++;
+    rt_log("online: test input: %s", l);
+    if (!strcmp(cmd, "type") || !strcmp(cmd, "chat")) {
+        if (!g_chat.typing) online_chat_open(NET_CHAT_ALL, "");
+        snprintf(g_chat.buf, sizeof g_chat.buf, "%s", arg);
+        if (!strcmp(cmd, "chat")) chat_submit();
+    } else if (!strcmp(cmd, "enter")) {
+        if (g_chat.typing) chat_submit();
+    } else if (!strcmp(cmd, "esc")) {
+        if (g_chat.typing) chat_close();
+        if (online_wheel_open()) online_wheel_close();
+        if (g_conf.on) confirm_close();
+    } else if (!strcmp(cmd, "wheel-down") || !strcmp(cmd, "wheel-up")) {
+        online_hotkey(k_wheel.load(), !strcmp(cmd, "wheel-down"));
+    } else if (!strcmp(cmd, "wheel")) {
+        online_wheel_demo(atoi(arg));
+    } else if (!strcmp(cmd, "confirm")) {
+        if (g_conf.on) {
+            void (*fn)(void *) = g_conf.fn;
+            void *u = g_conf.user;
+            confirm_close();
+            if (fn) fn(u);
+        }
+    } else if (!strcmp(cmd, "list")) {
+        online_list_toggle();
+    } else if (!strcmp(cmd, "yes") || !strcmp(cmd, "no")) {
+        online_answer_ask(!strcmp(cmd, "yes"));
+    } else if (*cmd) {
+        rt_log("online: test input: unknown command %s", cmd);
+    }
+}
+
+static void test_input_poll() {
+    static const char *path = cfg_get("TOTK_TEST_INPUT");
+    static long offset;
+    static double next;
+    if (!path || !*path) return;
+    double now = now_s();
+    if (now < next) return;
+    next = now + 0.2;
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    char buf[4096];
+    if (fseek(f, offset, SEEK_SET) == 0) {
+        size_t n = fread(buf, 1, sizeof buf - 1, f);
+        buf[n] = 0;
+        char *start = buf, *nl;
+        while ((nl = (char *)memchr(start, '\n', (size_t)(buf + n - start)))) {
+            *nl = 0;
+            offset += nl - start + 1;
+            test_input_line(start);
+            start = nl + 1;
+        }
+    }
+    fclose(f);
+}
+
 void online_pump(uint64_t frame) {
     (void)frame;
     if (!net_enabled()) return;
@@ -628,6 +703,7 @@ void online_pump(uint64_t frame) {
     net_tick();
     on_events();
     report_local();
+    test_input_poll();
     double now = now_s();
     toasts_expire(now);
     if (menu_is_open()) {   // the menu has the screen: close what holds the game's input
