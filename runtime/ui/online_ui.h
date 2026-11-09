@@ -60,6 +60,7 @@ bool online_player_color(const NetPlayer &p, ImU32 *col);          // role colou
 // text is cream with a one-pixel dark shadow, panels are sharp-cornered translucent dark bars, and a coloured square
 // marks a person or a kind, as in the game's own HUD.
 ImFont *online_game_font();
+bool online_heart(ImTextureID *tex, ImVec2 *uv0, ImVec2 *uv1);   // the game's heart picture, from the RomFS
 ImFont *look_font();
 void look_text(ImDrawList *dl, float size, ImVec2 pos, ImU32 col, const char *text, const char *end = nullptr);
 float look_width(float size, const char *text, const char *end = nullptr);

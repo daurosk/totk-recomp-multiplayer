@@ -234,10 +234,13 @@ LookStyle::~LookStyle() {
 // ---- toasts: notice rows on the left in the chat's own style (thin dark bars, the game's HUD font); a small coloured
 // square marks the kind (blue-grey info, green good, amber warning). A request (teleport, team invite) gets a second thin
 // row with the two answers.
+static ImVec4 g_toast_box = ImVec4(1e9f, 1e9f, -1e9f, -1e9f);   // where the toasts were last drawn: name tags keep clear of it
+
 void online_toasts_layout(float w, float h, float scale) {
-    (void)w;
+    g_toast_box = ImVec4(1e9f, 1e9f, -1e9f, -1e9f);
+    // right column, under the player list, so they never cross the chat
     double now = now_s();
-    float x = 10 * scale, y = h * 0.30f, fs = 22.8f * scale, row_h = 43 * scale, bar_h = 28 * scale;
+    float x = 10 * scale, y = 330 * scale, fs = 22.8f * scale, row_h = 43 * scale, bar_h = 28 * scale;
     const ImU32 tint[3] = {IM_COL32(140, 168, 208, 255), IM_COL32(125, 208, 140, 255), IM_COL32(244, 190, 92, 255)};
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     ImFont *font = look_font();
@@ -248,6 +251,7 @@ void online_toasts_layout(float w, float h, float scale) {
         if (a <= 0) continue;
         look_alpha(a);
         bool ask = t.what != 0;
+        float y_start = y;
         float maxw = 640 * scale;
         const char *s = t.text, *end = t.text + strlen(t.text);
         std::vector<std::pair<const char *, const char *>> rows;
@@ -257,6 +261,11 @@ void online_toasts_layout(float w, float h, float scale) {
             rows.push_back({s, brk});
             s = brk;
             while (s < end && *s == ' ') s++;
+        }
+        {
+            float tmax = 0;
+            for (auto &r : rows) tmax = fmaxf(tmax, look_width(fs, r.first, r.second));
+            x = w - 10 * scale - fmaxf(tmax + 54 * scale, ask ? 340 * scale : 0);
         }
         for (auto &r : rows) {
             float tw = look_width(fs, r.first, r.second);
@@ -298,6 +307,7 @@ void online_toasts_layout(float w, float h, float scale) {
             ImGui::PopStyleVar(2);
             y += row_h;
         }
+        g_toast_box = ImVec4(fminf(g_toast_box.x, x), fminf(g_toast_box.y, y_start), fmaxf(g_toast_box.z, w - 10 * scale), fmaxf(g_toast_box.w, y));
         y += 6 * scale;
     }
     look_alpha(1);
@@ -329,7 +339,6 @@ void online_confirm_layout(float w, float h, float scale) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22 * scale, 18 * scale));
     ImGui::Begin("##online_confirm", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings);
-    ImGui::SetWindowFontScale(22.8f / 26.0f);
     ImGui::TextWrapped("%s", g_conf.q);
     ImGui::Spacing();
     float bw = (pw - 44 * scale - ImGui::GetStyle().ItemSpacing.x) / 2;
@@ -505,7 +514,7 @@ void online_chat_layout(float w, float h, float scale) {
         if (g_chat.typing && net_state() != NET_ONLINE) chat_close();
         return;
     }
-    int lines = 10;
+    int lines = 7;
     const char *cl = cfg_get("TOTK_NET_CHAT_LINES");
     if (cl && atoi(cl) >= 4 && atoi(cl) <= 30) lines = atoi(cl);
     look_alpha(alpha);
@@ -525,7 +534,7 @@ void online_chat_layout(float w, float h, float scale) {
         const char *s = text, *end = text + strlen(text);
         bool first = true;
         while (s < end) {
-            const char *brk = font->CalcWordWrapPositionA(fs / font->FontSize, s, end, cw - tx - 24 * scale);
+            const char *brk = font->CalcWordWrapPositionA(fs / font->FontSize, s, end, fminf(cw, 560 * scale) - tx - 24 * scale);
             if (brk <= s) brk = s + 1;
             ChatRow r;
             r.text.assign(s, brk);
@@ -545,8 +554,13 @@ void online_chat_layout(float w, float h, float scale) {
     float input_h = g_chat.typing ? 74 * scale : 0;
     float bottom = h - 91 * scale - input_h;
     ImDrawList *dl = ImGui::GetForegroundDrawList();
-    float y = bottom - (float)(last - first_row) * row_h;
-    for (int i = first_row; i < last; i++, y += row_h) {
+    // Rows stack upward from the bottom. The game's location title sits at about 850..938 px of 1080 and the HUD's
+    // "Hyrule Field" line at its right; a row never lands on that band, it steps over it (one row fits under the title).
+    float band_top = 848 * scale, band_bot = 938 * scale, b = bottom;
+    for (int i = last - 1; i >= first_row; i--) {
+        if (b - 7 * scale > band_top && b - 7 * scale - bar_h < band_bot) b = band_top + 7 * scale;
+        float y = b - row_h;
+        b -= row_h;
         const ChatRow &r = rows[(size_t)i];
         float tw = look_width(fs, r.text.c_str());
         look_bar(dl, ImVec2(x0, y + 8 * scale), ImVec2(x0 + tx + tw + 14 * scale, y + 8 * scale + bar_h), 124);
@@ -614,10 +628,18 @@ bool online_player_color(const NetPlayer &p, ImU32 *col) {
     return p.role != NET_ROLE_PLAYER;
 }
 
-static ImU32 team_color(uint32_t team) {
-    static const ImU32 pal[] = {IM_COL32(140, 165, 205, 255), IM_COL32(125, 205, 140, 255), IM_COL32(240, 185, 90, 255),
-                                IM_COL32(215, 140, 200, 255), IM_COL32(120, 210, 210, 255), IM_COL32(230, 120, 110, 255)};
-    return team ? pal[(team - 1) % (sizeof pal / sizeof *pal)] : IM_COL32(150, 172, 205, 255);
+// A player's colour for the session: 12 colours that tell apart on the game's backgrounds, handed out in the order players
+// are first seen, so it stays the same for the square, the name tag and its arrow. Plain colours, no pictures.
+static ImU32 player_col(uint32_t id) {
+    static const ImU32 pal[12] = {IM_COL32(86, 156, 255, 255),  IM_COL32(255, 120, 60, 255),  IM_COL32(120, 220, 90, 255),
+                                  IM_COL32(255, 90, 170, 255),  IM_COL32(255, 220, 70, 255),  IM_COL32(160, 110, 255, 255),
+                                  IM_COL32(60, 220, 210, 255),  IM_COL32(235, 70, 70, 255),   IM_COL32(255, 255, 255, 255),
+                                  IM_COL32(180, 130, 70, 255),  IM_COL32(150, 200, 40, 255),  IM_COL32(110, 120, 140, 255)};
+    static std::vector<uint32_t> seen;
+    for (size_t i = 0; i < seen.size(); i++)
+        if (seen[i] == id) return pal[i % 12];
+    seen.push_back(id);
+    return pal[(seen.size() - 1) % 12];
 }
 
 // The direction the local player last moved in, as a compass angle (0 north, clockwise, radians); the camera sits behind
@@ -654,25 +676,32 @@ static void format_away(float d, char *out, size_t n, bool away) {
     else snprintf(out, n, "%s%d m", away ? "Away " : "", (int)d);
 }
 
-// A heart filled to `fill` (0..1) from the left, w px wide.
+// A heart filled to `fill` (0..1) from the left, w px wide: the game's own heart picture (menu.cpp, read from the RomFS)
+// tinted brown for the empty part and red, with a lighter top, for the full part.
 static void heart(ImDrawList *dl, ImVec2 a, float w, float fill) {
-    float r = w * 0.27f;
-    ImVec2 c1(a.x + w * 0.27f, a.y + w * 0.30f), c2(a.x + w * 0.73f, a.y + w * 0.30f), tip(a.x + w * 0.5f, a.y + w * 0.96f);
-    ImU32 dark = fade(IM_COL32(74, 40, 30, 255)), red = fade(IM_COL32(238, 84, 44, 255));
-    for (int pass = 0; pass < 2; pass++) {
-        ImU32 col = pass ? red : dark;
-        if (pass && fill <= 0) break;
-        float clip = pass ? a.x + w * fill : a.x + w + 1;
-        dl->PushClipRect(ImVec2(a.x - 1, a.y - 1), ImVec2(clip, a.y + w + 1), true);
-        dl->AddCircleFilled(c1, r, col, 14);
-        dl->AddCircleFilled(c2, r, col, 14);
-        dl->AddTriangleFilled(ImVec2(a.x + w * 0.02f, a.y + w * 0.38f), ImVec2(a.x + w * 0.98f, a.y + w * 0.38f), tip, col);
-        dl->PopClipRect();
-    }
+    ImTextureID tex;
+    ImVec2 u0, u1;
+    if (!online_heart(&tex, &u0, &u1)) return;
+    float s = w * 1.9f;
+    ImVec2 p0(a.x - (s - w) / 2, a.y - (s - w) / 2), p1(p0.x + s, p0.y + s);
+    dl->AddImage(tex, p0, p1, u0, u1, fade(IM_COL32(72, 38, 30, 255)));
+    if (fill <= 0) return;
+    dl->PushClipRect(ImVec2(p0.x, p0.y - 1), ImVec2(p0.x + s * (0.2f + 0.6f * fill), p1.y + 1), true);
+    dl->AddImage(tex, p0, p1, u0, u1, fade(IM_COL32(236, 76, 42, 255)));
+    dl->AddImage(tex, p0, ImVec2(p1.x, p0.y + s * 0.5f), u0, ImVec2(u1.x, u0.y + (u1.y - u0.y) * 0.5f), fade(IM_COL32(255, 176, 72, 120)));
+    dl->PopClipRect();
 }
 
 static void hearts_row(ImDrawList *dl, ImVec2 a, float w, float step, const NetPlayer &p) {
     if (!p.hearts_max_q) return;
+    ImTextureID tex;
+    ImVec2 u0, u1;
+    if (!online_heart(&tex, &u0, &u1)) {   // no heart picture in the RomFS: plain text
+        char t[24];
+        snprintf(t, sizeof t, "%g / %g", p.hearts_q / 4.0, p.hearts_max_q / 4.0);
+        look_text(dl, w * 1.2f, a, LOOK_DIM, t);
+        return;
+    }
     int n = (p.hearts_max_q + 3) / 4;
     for (int i = 0; i < n; i++) {
         int q = (int)p.hearts_q - i * 4;
@@ -681,13 +710,13 @@ static void hearts_row(ImDrawList *dl, ImVec2 a, float w, float step, const NetP
 }
 
 // An arrow toward a player, `rel` radians clockwise from straight ahead, in the game's cyan.
-static void arrow(ImDrawList *dl, ImVec2 c, float size, float rel) {
+static void arrow(ImDrawList *dl, ImVec2 c, float size, float rel, ImU32 col) {
     const ImVec2 pts[4] = {ImVec2(0, -1), ImVec2(0.72f, 0.85f), ImVec2(0, 0.4f), ImVec2(-0.72f, 0.85f)};
     ImVec2 q[4];
     for (int i = 0; i < 4; i++)
         q[i] = ImVec2(c.x + (pts[i].x * cosf(rel) - pts[i].y * sinf(rel)) * size, c.y + (pts[i].x * sinf(rel) + pts[i].y * cosf(rel)) * size);
-    dl->AddConvexPolyFilled(q, 4, fade(IM_COL32(112, 214, 226, 255)));
-    dl->AddPolyline(q, 4, fade(IM_COL32(40, 110, 130, 200)), ImDrawFlags_Closed, 1.0f);
+    dl->AddConvexPolyFilled(q, 4, fade(col));
+    dl->AddPolyline(q, 4, fade(IM_COL32(0, 0, 0, 170)), ImDrawFlags_Closed, 1.0f);
 }
 
 void online_list_layout(float w, float h, float scale) {
@@ -706,12 +735,12 @@ void online_list_layout(float w, float h, float scale) {
             online_player_color(p, &col);
             if (self) {
                 look_bar(dl, ImVec2(x0, y), ImVec2(x0 + rw, y + 28 * scale), 124);
-                look_square(dl, ImVec2(x0 + 1 * scale, y + 1 * scale), 26 * scale, team_color(p.team));
+                look_square(dl, ImVec2(x0 + 1 * scale, y + 1 * scale), 26 * scale, player_col(p.id));
                 look_text(dl, fs, ImVec2(x0 + 36 * scale, y + 3 * scale), col, p.name);
                 y += 53 * scale;
                 continue;
             }
-            look_square(dl, ImVec2(x0 + 1 * scale, y), 26 * scale, team_color(p.team));
+            look_square(dl, ImVec2(x0 + 1 * scale, y), 26 * scale, player_col(p.id));
             look_text(dl, fs, ImVec2(x0 + 36 * scale, y + 1 * scale), col, p.name);
             hearts_row(dl, ImVec2(x0 + 36 * scale, y + 27 * scale), 13 * scale, 13.2f * scale, p);
             float d;
@@ -719,7 +748,7 @@ void online_list_layout(float w, float h, float scale) {
             char away[32];
             format_away(d, away, sizeof away, true);
             look_text(dl, small, ImVec2(x0 + 276 * scale - look_width(small, away), y + 3 * scale), LOOK_DIM, away);
-            arrow(dl, ImVec2(x0 + 296 * scale, y + 9 * scale), 8.5f * scale, rel);
+            arrow(dl, ImVec2(x0 + 296 * scale, y + 9 * scale), 8.5f * scale, rel, player_col(p.id));
             y += 53 * scale;
         }
 }
@@ -736,6 +765,8 @@ void online_tags_layout(float w, float h, float scale) {
     NetPlayer pl[NET_MAX_PLAYERS];
     int n = net_players(pl, NET_MAX_PLAYERS);
     ImDrawList *dl = ImGui::GetForegroundDrawList();
+    float edge_x[8];
+    int nedge = 0;
     float small = 17.5f * scale, tan_v = tanf(25.0f * 3.14159265f / 180.0f), tan_h = tan_v * w / h;
     for (int i = 0; i < n; i++) {
         const NetPlayer &p = pl[i];
@@ -749,15 +780,19 @@ void online_tags_layout(float w, float h, float scale) {
             float sx = w / 2 + tanf(rel) / tan_h * (w / 2);
             float sy = h / 2 - ((p.pos[1] + 2.4f - (me[1] + 2.0f)) / fwd) / tan_v * (h / 2) - 0.08f * h;
             float tw = look_width(small, line);
+            if (sx + tw / 2 > g_toast_box.x && sx - tw / 2 < g_toast_box.z && sy + 36 * scale > g_toast_box.y && sy < g_toast_box.w) continue;   // under a toast
             look_text(dl, small, ImVec2(sx - tw / 2, sy), LOOK_TEXT, line);
             hearts_row(dl, ImVec2(sx - 4 * 11 * scale, sy + 22 * scale), 11 * scale, 10.5f * scale, p);
         } else {
-            float sx = w / 2 + sinf(rel) * w * 0.28f, sy = h - 118 * scale;
+            float sx = fmaxf(w / 2 + sinf(rel) * w * 0.2f, 860 * scale), sy = h - 100 * scale;
+            for (int k = 0; k < nedge; k++)   // two indicators close together stack upward
+                if (fabsf(edge_x[k] - sx) < 150 * scale) sy -= 78 * scale;
+            if (nedge < 8) edge_x[nedge++] = sx;
             float tw = look_width(small, line);
             float nw = look_width(small, p.name) + look_width(small, "  ");
             look_text(dl, small, ImVec2(sx - tw / 2, sy - 32 * scale), LOOK_DIM, p.name);
             look_text(dl, small, ImVec2(sx - tw / 2 + nw, sy - 32 * scale), LOOK_TEXT, dist);
-            arrow(dl, ImVec2(sx, sy + 8 * scale), 15 * scale, rel);
+            arrow(dl, ImVec2(sx, sy + 8 * scale), 15 * scale, rel, player_col(p.id));
         }
     }
 }

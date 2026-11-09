@@ -431,6 +431,93 @@ static uint8_t *hud_font_load(uint64_t *n) {
     return font;
 }
 
+// ---- the game's own heart picture, read from the player's RomFS at run time: the white heart "HeartW_00" (48x48, a BC4
+// mask) of UI/LayoutArchive/Common.Product.110.Nin_NX_NVN.blarc.zs, in its combined BNTX texture "timg/__Combined.bntx".
+// The online UI tints it red for a full heart and brown for an empty one. Decoded here (BNTX header, Tegra block-linear
+// swizzle, BC4) into 48x48 alpha values and put into the font atlas as a custom rectangle (fonts_up).
+enum { HEART_SIDE = 48 };
+static uint8_t g_heart_mask[HEART_SIDE * HEART_SIDE];
+static int g_heart_state;          // 0 not tried, 1 loaded, -1 missing
+static ImVec2 g_heart_uv0, g_heart_uv1;
+static bool g_heart_in_atlas;
+
+static unsigned bntx_addr(unsigned x, unsigned y, unsigned wb, unsigned bpp, unsigned bh) {
+    unsigned gw = (wb * bpp + 63) / 64;
+    unsigned g = (y / (8 * bh)) * 512 * bh * gw + (x * bpp / 64) * 512 * bh + (y % (8 * bh) / 8) * 512;
+    x *= bpp;
+    return g + ((x % 64) / 32) * 256 + ((y % 8) / 2) * 64 + ((x % 32) / 16) * 32 + (y % 2) * 16 + (x % 16);
+}
+
+static void bc4_block(const uint8_t *b, uint8_t out[16]) {
+    unsigned pal[8] = {b[0], b[1]};
+    if (b[0] > b[1]) for (int i = 0; i < 6; i++) pal[2 + i] = ((6 - i) * b[0] + (1 + i) * b[1]) / 7;
+    else {
+        for (int i = 0; i < 4; i++) pal[2 + i] = ((4 - i) * b[0] + (1 + i) * b[1]) / 5;
+        pal[6] = 0, pal[7] = 255;
+    }
+    uint64_t bits = 0;
+    for (int i = 0; i < 6; i++) bits |= (uint64_t)b[2 + i] << (8 * i);
+    for (int i = 0; i < 16; i++) out[i] = (uint8_t)pal[(bits >> (3 * i)) & 7];
+}
+
+static void heart_load() {
+    if (g_heart_state) return;
+    g_heart_state = -1;
+    uint64_t dn = 0, an = 0;
+    uint8_t *dz = romfs_slurp("Pack/ZsDic.pack.zs", &dn), *az = romfs_slurp("UI/LayoutArchive/Common.Product.110.Nin_NX_NVN.blarc.zs", &an);
+    uint8_t *dics = nullptr, *arc = nullptr;
+    size_t dics_n = 0, arc_n = 0, at, size;
+    if (dz && az && (dics = zs_unpack(dz, (size_t)dn, nullptr, 0, &dics_n)) && (arc = zs_unpack(az, (size_t)an, dics, dics_n, &arc_n)) &&
+        sarc_find(arc, arc_n, "timg/__Combined.bntx", &at, &size) && size > 0x200) {
+        const uint8_t *d = arc + at;
+        const uint8_t *nx = nullptr;
+        for (size_t i = 0; i + 16 < 0x80 && i + 4 < size; i += 4)
+            if (!memcmp(d + i, "NX  ", 4)) nx = d + i;
+        uint32_t cnt = 0;
+        uint64_t info = 0;
+        if (nx) memcpy(&cnt, nx + 4, 4), memcpy(&info, nx + 8, 8);
+        for (uint32_t i = 0; nx && i < cnt && info + 8ull * (i + 1) <= size; i++) {
+            uint64_t p;
+            memcpy(&p, d + info + 8ull * i, 8);
+            if (p + 0x80 > size || memcmp(d + p, "BRTI", 4)) continue;
+            uint64_t np, mp, off;
+            uint32_t w, h, fmt, bhl;
+            memcpy(&np, d + p + 0x60, 8), memcpy(&mp, d + p + 0x70, 8);
+            memcpy(&fmt, d + p + 0x1c, 4), memcpy(&w, d + p + 0x24, 4), memcpy(&h, d + p + 0x28, 4), memcpy(&bhl, d + p + 0x34, 4);
+            if (np + 2 > size || mp + 8 > size) continue;
+            uint16_t ln;
+            memcpy(&ln, d + np, 2);
+            if (np + 2 + ln > size || ln != 11 || memcmp(d + np + 2, "HeartW_00^s", 11)) continue;
+            memcpy(&off, d + mp, 8);
+            if (fmt != 0x1d01 || w != HEART_SIDE || h != HEART_SIDE || bhl > 4) break;
+            unsigned bh = 1u << bhl, wb = w / 4;
+            bool ok = true;
+            for (unsigned by = 0; by < h / 4 && ok; by++)
+                for (unsigned bx = 0; bx < wb; bx++) {
+                    uint64_t a = off + bntx_addr(bx, by, wb, 8, bh);
+                    if (a + 8 > size) {
+                        ok = false;
+                        break;
+                    }
+                    uint8_t px[16];
+                    bc4_block(d + a, px);
+                    for (int k = 0; k < 16; k++) g_heart_mask[(by * 4 + (unsigned)k / 4) * HEART_SIDE + bx * 4 + (unsigned)k % 4] = px[k];
+                }
+            if (ok) g_heart_state = 1;
+            break;
+        }
+    }
+    free(dz), free(az), free(dics), free(arc);
+    rt_log(g_heart_state > 0 ? "menu: the game's heart picture (HeartW_00) loaded from the RomFS" : "menu: no heart picture in the RomFS: hearts show as plain text");
+}
+
+// The heart's atlas rectangle and texture for the online UI; false when the RomFS has no heart picture.
+bool online_heart(ImTextureID *tex, ImVec2 *uv0, ImVec2 *uv1) {
+    if (!g_heart_in_atlas) return false;
+    *tex = ImGui::GetIO().Fonts->TexID, *uv0 = g_heart_uv0, *uv1 = g_heart_uv1;
+    return true;
+}
+
 static ImFont *g_game_font;   // the online UI's face (see fonts_up); null when the player's files hold none
 ImFont *online_game_font() { return g_game_font; }
 
@@ -483,7 +570,7 @@ static int fonts_up(float scale) {
             ImFontConfig gc;
             gc.FontDataOwnedByAtlas = false;
             game_ttf = hud;
-            g_game_font = fa->AddFontFromMemoryTTF(hud, (int)n, 26.0f * scale, &gc, kRanges);
+            g_game_font = fa->AddFontFromMemoryTTF(hud, (int)n, 22.8f * scale, &gc, kRanges);
         } else {
             free(hud);
         }
@@ -502,10 +589,30 @@ static int fonts_up(float scale) {
                 if (font_usable(game_ttf + 8, sn)) {
                     ImFontConfig gc;
                     gc.FontDataOwnedByAtlas = false;
-                    g_game_font = fa->AddFontFromMemoryTTF(game_ttf + 8, (int)sn, 26.0f * scale, &gc, kRanges);
+                    g_game_font = fa->AddFontFromMemoryTTF(game_ttf + 8, (int)sn, 22.8f * scale, &gc, kRanges);
                 }
             }
             rt_log(g_game_font ? "menu: online UI font: the Switch shared font %s" : "menu: no HUD font in the RomFS and none at %s: the online UI uses the menu font", path);
+        }
+    }
+    g_heart_in_atlas = false;
+    heart_load();
+    if (g_heart_state > 0) {   // the heart picture as a rectangle of the atlas, with a clear pixel border
+        int rid = fa->AddCustomRectRegular(HEART_SIDE + 2, HEART_SIDE + 2);
+        unsigned char *pix = nullptr;
+        int tw = 0, th = 0;
+        fa->GetTexDataAsRGBA32(&pix, &tw, &th);
+        const ImFontAtlasCustomRect *r = fa->GetCustomRectByIndex(rid);
+        if (pix && r && r->X + HEART_SIDE + 2 <= tw && r->Y + HEART_SIDE + 2 <= th) {
+            for (int y = 0; y < HEART_SIDE + 2; y++)
+                for (int x = 0; x < HEART_SIDE + 2; x++) {
+                    bool in = x >= 1 && y >= 1 && x <= HEART_SIDE && y <= HEART_SIDE;
+                    unsigned char *q = pix + 4 * ((size_t)(r->Y + y) * (size_t)tw + (size_t)(r->X + x));
+                    q[0] = q[1] = q[2] = 255, q[3] = in ? g_heart_mask[(y - 1) * HEART_SIDE + (x - 1)] : 0;
+                }
+            g_heart_uv0 = ImVec2((float)(r->X + 1) / (float)tw, (float)(r->Y + 1) / (float)th);
+            g_heart_uv1 = ImVec2((float)(r->X + 1 + HEART_SIDE) / (float)tw, (float)(r->Y + 1 + HEART_SIDE) / (float)th);
+            g_heart_in_atlas = true;
         }
     }
     vk_queue_lock();   // the upload submits on the queue and waits for it
