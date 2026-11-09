@@ -4,7 +4,8 @@
 // main"): the process manager is [main+0x4722268]; its +0x2d0 points at a table of 32 circular list heads 0x18 apart
 // (a node's next at +0, its actor at +0x10; an empty head points at itself), and every updating actor is in at least
 // one of them. An actor's name is at [+0x18] (also [+0x218]), its state at +0x24 (4 while it runs), its position at
-// +0x2b4, and the map instance id of a placed actor is the u64 at [[+0x370]+0x88] (0 or all ones: made at run time).
+// +0x2b4 with a 3x3 orientation before it at +0x290 (three axes of three floats, orthonormal on every actor but the
+// system procs), and the map instance id of a placed actor is the u64 at [[+0x370]+0x88] (0 or all ones: made at run time).
 //
 // Only the scan exists so far. make_copy, drive, puppet, hit and remove need the game's own creation, AI switch, damage
 // entry and removal, which are not probed yet, so na_game() stays NULL and net_client.c never offers OW_FEAT_ACTORS.
@@ -43,6 +44,38 @@ static int read_name(uint64_t actor, char *out, size_t cap) {
     return out[0] != 0;
 }
 
+// The orientation at +0x290 as a quaternion (x, y, z, w), taking the three vectors as the matrix's columns as the
+// position after them is its fourth column. Identity when the floats are not a rotation.
+static void read_rot(uint64_t actor, float q[4]) {
+    float m[9];
+    q[0] = q[1] = q[2] = 0.0f, q[3] = 1.0f;
+    if (!rd(actor + 0x290, m, sizeof m)) return;
+    for (int i = 0; i < 9; i++)
+        if (!isfinite(m[i])) return;
+#define M(r, c) m[(c) * 3 + (r)]
+    float t = M(0, 0) + M(1, 1) + M(2, 2), s;
+    if (t > 0.0f) {
+        s = sqrtf(t + 1.0f) * 2.0f;
+        q[3] = 0.25f * s, q[0] = (M(2, 1) - M(1, 2)) / s, q[1] = (M(0, 2) - M(2, 0)) / s, q[2] = (M(1, 0) - M(0, 1)) / s;
+    } else if (M(0, 0) > M(1, 1) && M(0, 0) > M(2, 2)) {
+        s = sqrtf(1.0f + M(0, 0) - M(1, 1) - M(2, 2)) * 2.0f;
+        q[3] = (M(2, 1) - M(1, 2)) / s, q[0] = 0.25f * s, q[1] = (M(0, 1) + M(1, 0)) / s, q[2] = (M(0, 2) + M(2, 0)) / s;
+    } else if (M(1, 1) > M(2, 2)) {
+        s = sqrtf(1.0f + M(1, 1) - M(0, 0) - M(2, 2)) * 2.0f;
+        q[3] = (M(0, 2) - M(2, 0)) / s, q[0] = (M(0, 1) + M(1, 0)) / s, q[1] = 0.25f * s, q[2] = (M(1, 2) + M(2, 1)) / s;
+    } else {
+        s = sqrtf(1.0f + M(2, 2) - M(0, 0) - M(1, 1)) * 2.0f;
+        q[3] = (M(1, 0) - M(0, 1)) / s, q[0] = (M(0, 2) + M(2, 0)) / s, q[1] = (M(1, 2) + M(2, 1)) / s, q[2] = 0.25f * s;
+    }
+#undef M
+    float n = sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+    if (!(n > 0.9f && n < 1.1f)) {   // not a rotation (a system proc's floats)
+        q[0] = q[1] = q[2] = 0.0f, q[3] = 1.0f;
+        return;
+    }
+    for (int i = 0; i < 4; i++) q[i] /= n;
+}
+
 static int seen_before(const NaSeen *out, int n, uint64_t actor) {
     for (int i = 0; i < n; i++)
         if (out[i].handle == actor) return 1;
@@ -70,7 +103,7 @@ int na_game_scan(NaSeen *out, int max) {
             s->map_id = id == UINT64_MAX ? 0 : id;
             s->cls = na_class_of(s->name);
             memcpy(s->body.pos, pos, sizeof pos);
-            s->body.rot[3] = 1.0f;   // the rotation field is not probed yet
+            read_rot(actor, s->body.rot);
             n++;
         }
     }

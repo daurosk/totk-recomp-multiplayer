@@ -11,7 +11,7 @@ to the owner and counts there; life travels in the owner's states, so it is equa
 |---|---|---|
 | Sync core: roles, epochs, offers, states, copies, hits, gone, spawn rule, wildlife leader rule | `runtime/net/net_actors.c`, `.h` | done, offline lab passes |
 | Offline lab: two invented games and a stub server, every message through the real codec | `tests/net_actors_lab.c`, `tests/net_actors_check.py` | 38 checks (and 24 of the link), built optimised and with UB traps |
-| Game side: `NaGame` over the recompiled game (scan, make a copy, drive, AI off, hit, removal) | `runtime/net_actors_game.c` | **scan only** (`na_game_scan`, read-only, 1.2.1); `na_game()` is NULL until copies can be made, driven and removed |
+| Game side: `NaGame` over the recompiled game (scan, make a copy, drive, AI off, hit, removal) | `runtime/net_actors_game.c` | **scan only** (`na_game_scan`, read-only, 1.2.1, with position and orientation); `na_game()` is NULL until copies can be made, driven and removed |
 | Link to the network thread: two queues of encoded payloads, the offer, the grant, loss and re-admit | `runtime/net/net_actors_link.c`, `.h` | done, `tests/net_actors_link_lab.c` passes |
 | Hook into `net_client.c`: offer `OW_FEAT_ACTORS`, hand 0x04xx frames to the link, send the core's messages, step each frame | `runtime/net/net_client.c` | done; inert while `na_game()` is NULL (nothing offered, nothing stepped) |
 
@@ -102,9 +102,24 @@ read rights alone sees the guest. The probe scripts are kept with the hand-over 
 - Not found in the actor's first 0x800 bytes: a field that is equal across loads and unique per actor (only the
   transform), which is why the id is behind +0x370.
 
-Still to probe, in order: life (the scan reports `life_max` 0 until then), rotation (the scan sends identity), the
-auto-placement mark (old notes: bit 24 of actor+0x5ac), sleeping objects (whether a placed object far from the player is
-in any of the 32 lists), the game's removal, the damage entry, creating an actor by name, the AI switch for copies.
+A sixth round (same save and place, 186 actors):
+
+- Orientation: the nine floats at +0x290 form an orthonormal 3x3 on 136 of 186 actors (49 of them not the identity), with
+  the position right after it at +0x2b4; the 50 others are system procs (`Chm_*`). So +0x290 to +0x2bf is a 3x4
+  transform, three axes and the position. The scan reads it as a quaternion taking the three vectors as columns; whether
+  the game stores columns or rows (one is the other's inverse) is not checked yet: a copy turned the wrong way would show it.
+- Bit 24 of +0x5ac is clear on every enemy, animal and object listed (set only on `WorldMgrSystemBaseProc`). The old
+  notes' auto-placement mark is not confirmed here; the five enemies and one insect near the player may all be placed
+  by the map (four of them have a map instance id), so the mark needs a round with wildlife or random monsters about.
+- No single tree or rock actor is listed (no `Obj_Tree_*`), only 30 `MergedActorD100` and a few `MergedActorD500`,
+  `D1000` and `Uncond`: trees and rocks far from interaction likely live inside merged actors and get an actor of their
+  own only when woken (not checked). Gameplay actors (enemies, crates, barrels, `AsbObj`) are listed out to about 145 m;
+  only large town and field pieces and areas are listed beyond 200 m.
+
+Still to probe, in order: life (the scan reports `life_max` 0 until then), what wakes a tree or rock out of its merged
+actor and whether the woken actor keeps a map instance id, the auto-placement mark with wildlife about, the game's
+removal, the damage entry, creating an actor by name, the AI switch for copies, and all of it on the version the
+release ships if that is not 1.2.1.
 
 ## Next: the game side
 
