@@ -110,6 +110,14 @@ keep_time:
         if (hs > FACE_MIN_SPEED) g.yaw = atan2f(g.vel[0], g.vel[2]);
         yaw_to_quat(g.yaw, s.rot);
     }
+    static int dump = -1;   // TOTK_CAMERA_DUMP=1 (vk_camera.c camera_dump): the player beside the camera blocks
+    if (dump < 0) dump = rt_knob("CAMERA_DUMP", "0");
+    static uint64_t next_dump;
+    if (dump && now >= next_dump) {
+        next_dump = now + 5000000000ull;
+        rt_log("camera dump: player %.3f %.3f %.3f rot %.4f %.4f %.4f | %.4f %.4f %.4f | %.4f %.4f %.4f", p[0], p[1], p[2],
+               m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]);
+    }
     if (mode != g.rot_mode) {
         g.rot_mode = mode;
         rt_log("puppets: local facing from %s", mode ? "the actor's rotation matrix" : "the direction of travel");

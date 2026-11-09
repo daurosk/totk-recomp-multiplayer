@@ -32,8 +32,11 @@ static float g_local_pos[3];
 static char g_local_area[NET_AREA_MAX] = "Unknown", g_local_char[NET_NAME_MAX] = "Link";
 static char g_name[NET_NAME_MAX] = "You";
 // The invented players stand within a hundred metres of the local player, so a teleport to one lands on ground the
-// game has loaded.
+// game has loaded. The first of them (id 2) instead stands AHEAD_M in front of the local player, along the facing of
+// the last net_set_self, so a name tag and a body can be seen on screen without moving the camera.
 static const float g_off[][3] = {{0, 0, 0}, {40, 2, 10}, {-60, 0, 30}, {25, 0, -70}, {90, 0, 15}};
+#define AHEAD_M 8.0f
+static float g_fwd[2] = {0, 1};   // the local player's horizontal facing (x, z), from net_set_self
 
 static int fake_on(void) {
     if (g_fake < 0) {
@@ -220,6 +223,10 @@ void net_tick(void) {
     for (int i = 1; i < g_npl; i++) {   // and they keep their place around the local player
         int k = (int)(g_pl[i].id < 5 ? g_pl[i].id : 4) - 1;
         for (int c = 0; c < 3; c++) g_pl[i].pos[c] = g_local_pos[c] + g_off[k][c];
+        if (g_pl[i].id == 2) {
+            g_pl[i].pos[0] = g_local_pos[0] + AHEAD_M * g_fwd[0];
+            g_pl[i].pos[2] = g_local_pos[2] + AHEAD_M * g_fwd[1];
+        }
     }
 }
 
@@ -271,7 +278,12 @@ void net_set_local(const char *area, const float pos[3], const char *character) 
 static int g_self_in_world = 1;
 
 void net_set_self(const NetSelf *self) {
-    if (self) g_self_in_world = self->in_world;
+    if (!self) return;
+    g_self_in_world = self->in_world;
+    // the body's +z axis turned by its rotation (yaw 0 faces +z)
+    const float *q = self->rot;
+    float fx = 2 * (q[0] * q[2] + q[3] * q[1]), fz = 1 - 2 * (q[0] * q[0] + q[1] * q[1]), l = sqrtf(fx * fx + fz * fz);
+    if (self->in_world && l > 0.1f) g_fwd[0] = fx / l, g_fwd[1] = fz / l;
 }
 
 int net_puppets(NetPuppet *out, int max) {

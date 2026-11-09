@@ -5,6 +5,7 @@
 // snapshot on the replay thread whenever a scene draw binds a block at a new address, into a sequence-locked copy the
 // present thread reads.
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "host.h"
@@ -24,9 +25,39 @@ static struct {
     uint64_t addr;                  // the block copied last (replay thread only)
 } C;
 
+// TOTK_CAMERA_DUMP=1 (a probe): every 5 s, for 50 ms, logs each distinct 0x940 block bound at c4, rows 0 to 15 with
+// the depth target it was drawn with, so the camera layout can be fitted offline against known world positions.
+static void camera_dump(VkExec *ex, uint64_t now) {
+    static int on = -1;
+    if (on < 0) on = rt_knob("CAMERA_DUMP", "0");
+    if (!on) return;
+    static uint64_t win_start, next_win;
+    static uint64_t seen[16];
+    static int nseen;
+    if (now >= next_win) {
+        win_start = now, next_win = now + 5000000000ull, nseen = 0;
+    }
+    if (now - win_start > 50000000ull || nseen >= 16) return;
+    const p_bind_buf *b = &ex->ubo[0][1];
+    if (b->size != CAM_BLOCK || !b->addr) return;
+    for (int i = 0; i < nseen; i++)
+        if (seen[i] == b->addr) return;
+    seen[nseen++] = b->addr;
+    const float *r = (const float *)vk_usnap_bytes(b->addr, 256);
+    if (!r) return;
+    const VkExecTarget *z = &ex->depth;
+    char line[2048];
+    int o = snprintf(line, sizeof line, "camera dump: block %d %llx depth %ux%u fmt %d:", nseen, (unsigned long long)b->addr,
+                     z->image ? z->width : 0, z->image ? z->height : 0, z->image ? (int)z->format : -1);
+    for (int i = 0; i < 64 && o < (int)sizeof line - 24; i++)
+        o += snprintf(line + o, sizeof line - o, "%s%.6g", i % 4 ? "," : " | ", (double)r[i]);
+    rt_log("%s", line);
+}
+
 void vk_camera_draw(VkExec *ex) {
     const p_bind_buf *b = &ex->ubo[0][1];
     const VkExecTarget *z = &ex->depth;
+    camera_dump(ex, plat_now_ns());
     if (b->size != CAM_BLOCK || !b->addr || !z->image || z->width < DLAA_SCENE_MIN_W || z->format != VK_FORMAT_D32_SFLOAT)
         return;
     uint64_t now = plat_now_ns();

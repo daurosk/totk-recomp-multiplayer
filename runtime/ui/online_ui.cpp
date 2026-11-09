@@ -749,8 +749,8 @@ void online_pump(uint64_t frame) {
 // camera's view-projection (vk_camera.h). The clip w of a perspective projection is the depth in front of the camera,
 // so a point with w at or under TAG_NEAR is behind the camera and gets no tag, and w also sets the fade: full up to
 // TAG_FULL_M, gone at TAG_FAR_M, the text a little smaller with distance. No tag while the scene camera is stale (a
-// menu, a loading screen: no scene was drawn for TAG_CAM_STALE_NS). The game draws with an upper-left window origin
-// (docs/maxwell.md 1.15), so NDC y -1 is the top of the screen; TOTK_PUPPET_TAG_FLIPY=1 turns that round.
+// menu, a loading screen: no scene was drawn for TAG_CAM_STALE_NS). The camera's clip y grows with world height (a
+// dump of the block against the player's position showed it), so NDC y +1 is the top of the screen.
 #define TAG_HEIGHT 2.05f
 #define TAG_NEAR 0.3f
 #define TAG_FULL_M 40.0f
@@ -762,7 +762,6 @@ void online_tags_layout(float w, float h, float scale) {
     float m[16];
     uint64_t age = 0;
     int cam = vk_camera_viewproj(m, &age);
-    static const int flip = rt_knob("PUPPET_TAG_FLIPY", "0");
     NetPuppet pp[NET_MAX_PLAYERS];
     int n = net_puppets(pp, NET_MAX_PLAYERS);
     static double next_log;   // every 5 s: the camera and each puppet's projection, for checking tags in a log
@@ -792,8 +791,7 @@ void online_tags_layout(float w, float h, float scale) {
         if (!(c[3] > TAG_NEAR) || c[3] > TAG_FAR_M) continue;
         float nx = c[0] / c[3], ny = c[1] / c[3];
         if (fabsf(nx) > 1.2f || fabsf(ny) > 1.2f) continue;
-        if (flip) ny = -ny;
-        float sx = (nx * 0.5f + 0.5f) * w, sy = (ny * 0.5f + 0.5f) * h;
+        float sx = (nx * 0.5f + 0.5f) * w, sy = (0.5f - ny * 0.5f) * h;
         float fade = c[3] <= TAG_FULL_M ? 1.0f : (TAG_FAR_M - c[3]) / (TAG_FAR_M - TAG_FULL_M);
         float a = fade * p.alpha;
         if (a <= 0.02f) continue;
