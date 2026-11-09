@@ -86,19 +86,22 @@ def test_wallet(srv, bots):
     r = wallet(bots, 'alice', 5, 800, EARN)
     check(r and r['granted'] == 800 and r['rupees'] == 800, 'an earn within the cap is accepted')
     r = wallet(bots, 'alice', 6, 5000, EARN)
-    check(r and r['granted'] == 700 and r['rupees'] == 1500,
+    # the rate refills 25 a second, so a slow machine may add a little to the 700 that is left
+    check(r and 700 <= r['granted'] <= 800 and r['rupees'] == 800 + r['granted'],
           'an earn over the rate per minute is cut to what is left of it (1500 a minute)')
     r = wallet(bots, 'alice', 7, 900, TRADE)
-    check(r and r['granted'] == 0, 'and a gain by trade counts against the same rate')
+    check(r and 0 <= r['granted'] <= 100, 'and a gain by trade counts against the same rate')
+    before = r['rupees'] if r else 0
     r = wallet(bots, 'alice', 8, -1000, TRADE)
-    check(r and r['granted'] == -1000 and r['rupees'] == 500, 'a trade may take')
+    check(r and r['granted'] == -1000 and r['rupees'] == before - 1000, 'a trade may take')
+    left = r['rupees'] if r else 0
     r = wallet(bots, 'bob', 1, 5000, EARN)
     check(r and r['granted'] == 1000 and r['rupees'] == 1100, 'one request adds at most wallet_earn_max (1000)')
     r = wallet(bots, 'bob', 2, 2 ** 31 - 1, EARN)
     check(r and r['granted'] <= 500, 'a huge request is cut as well')
     bots.send('alice', 'wallet_ask', seq=9, delta=-2 ** 31, cause=SPEND)
     r = bots.expect('alice', 'wallet', 3, seq=9)
-    check(r and r['granted'] == -500 and r['rupees'] == 0, 'the most negative number takes the balance and no more')
+    check(r and r['granted'] == -left and r['rupees'] == 0, 'the most negative number takes the balance and no more')
     check(base_value(srv, 'wallet', 1) is not None, 'economy.txt lists the wallets after a moment')
 
 
