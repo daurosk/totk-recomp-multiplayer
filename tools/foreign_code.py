@@ -16,8 +16,9 @@ Standard library only. Used by tools/check_content.py; tests/foreign_code_check.
 import hashlib
 import re
 
-# Files that may name a banned project. None: the check covers every file. A name ending in "/" would be a folder.
-CREDIT_FILES: set[str] = set()
+# Files that may name another project to credit it: the README and the release notes say what inspired this one.
+# A name ending in "/" is a folder. Code never may.
+CREDIT_FILES = {"README.md", "release-notes/"}
 
 # length of normalized text -> digests
 SUBSTRING_DIGESTS = {
