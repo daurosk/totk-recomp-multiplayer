@@ -2,7 +2,7 @@
  *
  * docs/online-wire.md section 9.1 states the rules; this file names their numbers and sv_owner.c applies them. Pure:
  * no records, no clock, no I/O, so tests/actor_lab.c can drive every rule on a virtual clock. The numbers are the
- * ones the old port's rounds settled (its SyncFix S1 rules), re-expressed in our own terms.
+ * ones the old port's rounds settled (its S1 rules), re-expressed in our own terms.
  *
  * sv_actors.c runs the parts that need records (holds over a whole group, followers, the leaving owner's actors) and
  * calls svo_decide for one actor, or for a group as one actor at its centre.

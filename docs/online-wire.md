@@ -306,7 +306,7 @@ takes a hit to the owner with the attacker's account, `spawned` and `gone` tell 
 
 **The owner rules.** Distances run from a player's position to the actor's last position (for a group, its centre). A
 player is *present* while its game is connected and its place is `OW_PLACE_PLAYING`. The numbers are the ones
-SyncFix's rounds settled; `server/sv_owner.h` names each.
+the old port's rounds settled (its S1 rules); `server/sv_owner.h` names each.
 
 | # | Rule | Cause |
 |---|---|---|

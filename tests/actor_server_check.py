@@ -113,10 +113,11 @@ def body(bots):
     g = bots.expect('bob', 'gone')
     h.check(g is not None and g['id']['serial'] == 5 and g['cause'] == GONE_REMOVED,
             "a copy's summons is refused with gone, so its game removes it")
+    # Two connections have no order between them, so the second take goes once the first is answered.
     bots.send('bob', 'take', **{'id.origin': ALICE, 'id.serial': 77, 'epoch': 1})
-    bots.send('alice', 'take', **{'id.origin': ALICE, 'id.serial': 77, 'epoch': 1})
     t1 = bots.expect('bob', 'taken')
-    t2 = bots.expect('alice', 'taken')
+    bots.send('alice', 'take', **{'id.origin': ALICE, 'id.serial': 77, 'epoch': 1})
+    t2 = bots.expect('alice', 'taken', pred=lambda e: e['id']['serial'] == 77)
     h.check(t1 is not None and t1['yours'] == 1 and t1['taker'] == BOB, 'the first take gets the thing')
     h.check(t2 is not None and t2['yours'] == 0 and t2['taker'] == BOB,
             'a game that takes it later learns who has it, and removes its copy')

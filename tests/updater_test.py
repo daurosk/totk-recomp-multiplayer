@@ -273,6 +273,44 @@ def process_path(pid):
     return buf.value if ok else ''
 
 
+def kill_under(folder):
+    """Kills every process whose program lies below folder (fake games, updaters, fake setups); their pids."""
+    out = subprocess.run(['tasklist', '/FO', 'CSV', '/NH'], capture_output=True, text=True).stdout
+    root, killed = str(folder).lower() + os.sep, []
+    for line in out.splitlines():
+        parts = line.split('","')
+        if len(parts) > 1 and parts[1].isdigit() and process_path(int(parts[1])).lower().startswith(root):
+            subprocess.run(['taskkill', '/F', '/PID', parts[1]], capture_output=True)
+            killed.append(int(parts[1]))
+    return killed
+
+
+def own_job():
+    """Puts this process in a job that kills everything it started, at any depth, when the test exits or is killed:
+    no prompt or game of a test outlives it. Processes started later inherit the job (nested jobs, Windows 8 on)."""
+    kernel32.CreateJobObjectW.restype = wt.HANDLE
+    kernel32.GetCurrentProcess.restype = wt.HANDLE
+    kernel32.SetInformationJobObject.argtypes = (wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD)
+    kernel32.AssignProcessToJobObject.argtypes = (wt.HANDLE, wt.HANDLE)
+    job = kernel32.CreateJobObjectW(None, None)
+
+    class LIMITS(ctypes.Structure):
+        _fields_ = [('PerProcessUserTimeLimit', ctypes.c_int64), ('PerJobUserTimeLimit', ctypes.c_int64),
+                    ('LimitFlags', wt.DWORD), ('MinimumWorkingSetSize', ctypes.c_size_t),
+                    ('MaximumWorkingSetSize', ctypes.c_size_t), ('ActiveProcessLimit', wt.DWORD),
+                    ('Affinity', ctypes.c_size_t), ('PriorityClass', wt.DWORD), ('SchedulingClass', wt.DWORD),
+                    ('io', ctypes.c_uint64 * 6), ('ProcessMemoryLimit', ctypes.c_size_t),
+                    ('JobMemoryLimit', ctypes.c_size_t), ('PeakProcessMemoryUsed', ctypes.c_size_t),
+                    ('PeakJobMemoryUsed', ctypes.c_size_t)]
+    lim = LIMITS()
+    lim.LimitFlags = 0x2000   # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    ok = (job and kernel32.SetInformationJobObject(job, 9, ctypes.byref(lim), ctypes.sizeof(lim))
+          and kernel32.AssignProcessToJobObject(job, kernel32.GetCurrentProcess()))
+    if not ok:
+        sys.exit(f'cannot put the test in a kill-on-close job (error {ctypes.get_last_error()})')
+    return job   # the handle stays open until the process ends
+
+
 def windows_under(folder):
     """[(hwnd, pid, title, class)] of the visible top-level windows whose process runs from below folder."""
     found = []
@@ -687,6 +725,7 @@ def main():
     # the updater opens every window of its own in this slot of the second monitor, never activated (update.c,
     # test_window_setup); the game and setup stand-ins open none
     os.environ['TOTK_TEST_WINDOW'] = str(a.slot)
+    job = own_job()  # noqa: F841 (kept open for the whole run)
     work = a.work.resolve()
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
@@ -697,9 +736,16 @@ def main():
     release_new(work, bins, key)
     for name in (a.only.split(',') if a.only else SCENARIOS):
         print(f'-- {name}', flush=True)
-        if name != 'older':
-            release_new(work, bins, key)
-        globals()[f's_{name}'](work, bins, server, key, a)
+        try:
+            if name != 'older':
+                release_new(work, bins, key)
+            globals()[f's_{name}'](work, bins, server, key, a)
+        finally:
+            # a case that failed may leave its prompt waiting for a click, or its game running: nothing it started
+            # stays when the next case begins
+            left = kill_under(work / name)
+            if left:
+                print(f'      killed {len(left)} process(es) the case left running', flush=True)
     print(f'{len(failures)} failed' if failures else 'all passed')
     sys.exit(1 if failures else 0)
 
