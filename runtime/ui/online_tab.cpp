@@ -139,7 +139,7 @@ void online_tab(float scale, float bottom) {
         ImGui::TextUnformatted("Wheel on a controller");
         ImGui::SameLine(ImGui::GetWindowWidth() * 0.34f);
         char lab[160];
-        const char *cur = cfg_or("TOTK_NET_PAD_WHEEL", "minus+lstick");
+        const char *cur = cfg_or("TOTK_NET_PAD_WHEEL", "down");
         if (capturing == 100) snprintf(lab, sizeof lab, "Hold the buttons...");
         else chord_label(cur, lab, sizeof lab);
         if (ImGui::Button(lab, ImVec2(ImGui::GetWindowWidth() * 0.2f, 0))) {
@@ -171,7 +171,8 @@ void online_tab(float scale, float bottom) {
     }
     if (ImGui::Button("Reset keys")) {
         for (auto &r : rows) set(r.key, r.def);
-        set("TOTK_NET_PAD_WHEEL", "minus+lstick");
+        set("TOTK_NET_PAD_WHEEL", "down");
+        set("TOTK_NET_WHEEL_HOLD_MS", "350");
         capturing = -1;
     }
     ImGui::TextDisabled("While a key is waiting, Delete clears it and Esc cancels. The wheel key never reaches the game while online.");
@@ -185,6 +186,13 @@ void online_tab(float scale, float bottom) {
         char v[16];
         snprintf(v, sizeof v, "%d", ws);
         set("TOTK_NET_WHEEL_SCALE", v);
+    }
+    int hold = atoi(cfg_or("TOTK_NET_WHEEL_HOLD_MS", "350"));
+    ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.42f);
+    if (ImGui::SliderInt("Controller hold time", &hold, 0, 2000, "%d ms")) {
+        char v[16];
+        snprintf(v, sizeof v, "%d", hold);
+        set("TOTK_NET_WHEEL_HOLD_MS", v);
     }
     int fade = atoi(cfg_or("TOTK_NET_CHAT_FADE", "10"));
     ImGui::SetNextItemWidth(ImGui::GetWindowWidth() * 0.42f);
